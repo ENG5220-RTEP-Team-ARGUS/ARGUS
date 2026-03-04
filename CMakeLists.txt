@@ -1,4 +1,5 @@
-cmake_minimum_required(VERSION 3.16)
+set(OpenCV_DIR "C:/Users/patri/opencv/opencv/build")
+cmake_minimum_required(VERSION 3.10)
 project(ARGUS)
 
 set(CMAKE_CXX_STANDARD 17)
