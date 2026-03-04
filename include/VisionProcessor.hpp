@@ -13,6 +13,10 @@
  All tunable parameters are injected via VisionConfig at construction,
  satisfying the Open/Closed Principle: behaviour can be changed by
  supplying a different config without modifying this class.
+
+ Deliberately decoupled from camera capture, threading, state machine
+ logic and logging, making it fully deterministic and unit-testable.
+ Tests can call process() directly with a synthetic frame, no camera needed.
  */
 
 #include <opencv2/opencv.hpp>
@@ -57,7 +61,7 @@ public:
 
 private:
 
-    //  Configuration (injected at construction)
+    // Configuration (injected at construction)
 
     // Owns a copy of the config so external changes cannot
     // affect in-flight processing decisions.

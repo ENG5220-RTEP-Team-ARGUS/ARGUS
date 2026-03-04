@@ -3,20 +3,14 @@
  Implementation of the ARGUS vision safety evaluator.
  
  This file contains the logic for ArUco marker detection and
- safety evaluation. Each method is designed to be deterministic,
- bounded in execution time and free of blocking calls.
- 
- Processing is intentionally split across methods to keep each
- function focused on a single responsibility, making the logic
- easier to test, debug and reason about.
+ safety evaluation.
 */
 
 #include "VisionProcessor.hpp"
 
 // Constructor
-// All one-time setup happens here — dictionary creation and detector initialisation 
-// so that process() itself remains fast and its execution time predictable.
-//
+// All expensive one-time setup (dictionary, detector) is done in the
+// constructor so process() stays fast and its latency stays predictable.
 
 VisionProcessor::VisionProcessor(const VisionConfig& config)
     : config_(config),

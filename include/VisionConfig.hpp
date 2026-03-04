@@ -7,17 +7,15 @@
  This struct holds all tunable parameters that control how the
  VisionProcessor evaluates safety. By separating configuration
  from algorithm logic, the VisionProcessor remains deterministic
- and testable and different configs can be injected without touching
+ and testable and different configs can be used without touching
  any processing code.
  
  In production, these values would be loaded from config/vision_config.yaml
  at startup rather than relying on the defaults defined here.
- 
- No logic lives here, only plain configuration data.
 */
 
 //  VisionConfig
-//  Injected into VisionProcessor at construction time.
+//  Implemented into VisionProcessor at construction time.
 //  All safety thresholds and zone boundaries are defined here.
 
 struct VisionConfig {
@@ -31,18 +29,15 @@ struct VisionConfig {
 
     //  Speed threshold
 
-    // Maximum permitted speed of the marker centroid between
-    // consecutive frames, in pixels per second.
+    // Max permitted centroid displacement in pixels/second.
     // Exceeding this triggers SafetyState::EXCESSIVE_SPEED.
-    // Value should be calibrated against the physical robot's
-    // maximum safe operating speed projected into image space.
+    // Calibrate against the robot's max safe speed projected into image space.
     float maxSpeed = 200.0f;
 
-    //  Safe zone boundary (pixels in camera image space)
+    //  Safe zone (pixels, in full camera frame coordinates)
     //  Defines a rectangular region within which the marker
     //  centroid must remain for the system to report SAFE.
-    //  Coordinates are relative to the full camera frame,
-    //  before any ROI crop is applied.
+    //  Violation triggers SafetyState::OUTSIDE_ALLOWED_ZONE.
 
     // Left boundary of the safe zone (pixels).
     int safeZoneXMin = 100;
@@ -53,14 +48,15 @@ struct VisionConfig {
     // Top boundary of the safe zone (pixels).
     int safeZoneYMin = 100;
 
-    /// Bottom boundary of the safe zone (pixels).
+    // Bottom boundary of the safe zone (pixels).
     int safeZoneYMax = 400;
 
 
-    //  Orientation limits (degrees)
+    //  Orientation limits (degrees, in image plane)
     //  Defines the permitted angular range of the marker.
     //  Angles are computed from the marker corner positions
     //  and represent rotation in the image plane.
+    //  Violation triggers SafetyState::INVALID_ORIENTATION.
 
     // Minimum permitted marker orientation angle in degrees.
     float orientationMin = -45.0f;
