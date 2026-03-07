@@ -28,8 +28,7 @@ GuardianStateMachine::GuardianStateMachine(int fc, int rc)
       onStateChangeCallback(nullptr) {               // No state change handler registered yet
 
     // Log initialization to verify freezeCount and recoverCount values
-    std::cout << "[INIT] Guardian State Machine initialized with freezeCount=" 
-              << freezeCount << ", recoverCount=" << recoverCount << std::endl;
+    std::cout << "[INIT] Guardian State Machine initialized with freezeCount=" << freezeCount << ", recoverCount=" << recoverCount << std::endl;
 }
 
 
@@ -161,7 +160,7 @@ void GuardianStateMachine::logAction(const std::string& action) {
 
     Purpose:
     - Main section of the state machine
-    - Takes a GuardianEvent (FRAME_GOOD / FRAME_BAD / OPERATOR_RESET) and updates counters + changes state when rules are met
+    - Takes a GuardianEvent (FRAME_GOOD / FRAME_BAD / OPERATOR_ACK) and updates counters + changes state when rules are met
 
     Key safety behavior:
     1) SAFE_MONITORING:
@@ -171,7 +170,7 @@ void GuardianStateMachine::logAction(const std::string& action) {
 
     2) FROZEN_UNSAFE:
        - stay frozen regardless of frames
-       - only OPERATOR_RESET allows move to RESET_PENDING
+       - only OPERATOR_ACK allows move to RESET_PENDING
 
     3) RESET_PENDING:
        - count consecutive good frames
@@ -194,8 +193,7 @@ void GuardianStateMachine::processEvent(GuardianEvent event) {
                     transitionTo(GuardianState::FROZEN_UNSAFE, GuardianAction::FREEZE_NOW);
                 } else {
                     // Otherwise, log how close we are to freezing
-                    std::cout << "[SAFE_MONITORING] bad_count="
-                              << badCount << "/" << freezeCount << std::endl;
+                    std::cout << "[SAFE_MONITORING] Frame Failed, bad_count=" << badCount << "/" << freezeCount << std::endl;
                 }
 
             // Assume a good frame is detected
@@ -211,7 +209,7 @@ void GuardianStateMachine::processEvent(GuardianEvent event) {
         // STATE: FROZEN_UNSAFE
         case GuardianState::FROZEN_UNSAFE:
             // Only operator reset to proceed
-            if (event == GuardianEvent::OPERATOR_RESET) {
+            if (event == GuardianEvent::OPERATOR_ACK) {
                 // Start recovery checking when operator acknowledges
                 goodCount = 0;
 
@@ -221,8 +219,7 @@ void GuardianStateMachine::processEvent(GuardianEvent event) {
             } else if (event == GuardianEvent::FRAME_BAD || event == GuardianEvent::FRAME_GOOD) {
                 // This is to intentionally stay frozen for safety even if frames passed
                 // To prevent automatic restart after a dangerous anomaly
-                std::cout << "[FROZEN_UNSAFE] Remaining frozen, awaiting operator acknowledgment"
-                          << std::endl;
+                std::cout << "[FROZEN_UNSAFE] Remaining frozen, awaiting operator acknowledgment" << std::endl;
             }
             break;
 
@@ -242,8 +239,7 @@ void GuardianStateMachine::processEvent(GuardianEvent event) {
                     transitionTo(GuardianState::SAFE_MONITORING, GuardianAction::CLEAR_FREEZE);
                 } else {
                     // Not enough good frames yet
-                    std::cout << "[RESET_PENDING] good_count="
-                              << goodCount << "/" << recoverCount << std::endl;
+                    std::cout << "[RESET_PENDING] good_count=" << goodCount << "/" << recoverCount << std::endl;
                 }
 
             } else if (event == GuardianEvent::FRAME_BAD) {
@@ -276,7 +272,7 @@ void GuardianStateMachine::processFrame(FrameStatus status) {
 
     Purpose:
     - Public API for human/operator acknowledgment
-    - Logs the acknowledgment and triggers OPERATOR_RESET event
+    - Logs the acknowledgment and triggers OPERATOR_ACK event
 
     Safety workflow:
     - Something went wrong in current situation -> freeze
@@ -285,7 +281,7 @@ void GuardianStateMachine::processFrame(FrameStatus status) {
 */
 void GuardianStateMachine::operatorAcknowledge() {
     std::cout << "[OPERATOR] Acknowledgment received" << std::endl;
-    processEvent(GuardianEvent::OPERATOR_RESET);
+    processEvent(GuardianEvent::OPERATOR_ACK);
 }
 
 
@@ -371,5 +367,5 @@ void GuardianStateMachine::printStatus() const {
     std::cout << "Motion: " << (motionBlocked ? "BLOCKED" : "ALLOWED") << std::endl;
     std::cout << "Bad Count: " << badCount << "/" << freezeCount << std::endl;
     std::cout << "Good Count: " << goodCount << "/" << recoverCount << std::endl;
-    std::cout << "=====================\n" << std::endl;
+    std::cout << "=======================\n" << std::endl;
 }

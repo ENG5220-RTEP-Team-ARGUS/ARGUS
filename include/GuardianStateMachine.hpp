@@ -20,7 +20,7 @@ enum class FrameStatus {
 enum class GuardianEvent {
     FRAME_GOOD,        // Event triggered when a safe frame is received
     FRAME_BAD,         // Event triggered when an unsafe frame is received
-    OPERATOR_RESET       // Event triggered when operator acknowledges/reset
+    OPERATOR_ACK       // Event triggered when operator acknowledges/reset
 };
 
 enum class GuardianAction {

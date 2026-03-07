@@ -143,7 +143,7 @@ int main() {
         Scenario 5: Operator Acknowledgment
 
         Expected:
-        - OPERATOR_RESET moves state from FROZEN_UNSAFE -> RESET_PENDING
+        - OPERATOR_ACK moves state from FROZEN_UNSAFE -> RESET_PENDING
         - Still frozen (motionBlocked remains true)
         - Now the guardian begins counting good frames
     */
