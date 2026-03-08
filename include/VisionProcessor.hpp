@@ -9,7 +9,7 @@
  whether the current state of the tool is safe.
  
  Design note (Single Responsibility Principle):
- This class does exactly one thing — vision-based safety evaluation.
+ This class does exactly one thing - vision-based safety evaluation.
  All tunable parameters are injected via VisionConfig at construction,
  satisfying the Open/Closed Principle: behaviour can be changed by
  supplying a different config without modifying this class.
@@ -38,7 +38,7 @@ public:
 
     // Construct a VisionProcessor with the given configuration.
     // config: Safety thresholds and zone boundaries. Injected at
-    // construction to satisfy Dependency Inversion —
+    // construction to satisfy Dependency Inversion -
     // this class depends on an abstraction (VisionConfig),
     // not on hardcoded values.
     explicit VisionProcessor(const VisionConfig& config);
@@ -69,12 +69,14 @@ private:
 
     //  ArUco detection members
     //  Initialised once in the constructor to avoid repeated
-    //  heap allocation on every frame — keeps process() fast
+    //  heap allocation on every frame - keeps process() fast
     //  and processing time predictable.
 
     // The ArUco marker dictionary to detect against.
     // Determined by config and created once at construction.
-    cv::Ptr<cv::aruco::Dictionary> dictionary_;
+    // after
+    // TODO: verify OpenCV version on Pi - if < 4.7 revert to cv::Ptr<cv::aruco::Dictionary>
+    cv::aruco::Dictionary dictionary_;
 
     // Tunable detector parameters (thresholding, contour filtering, etc.).
     // Default parameters are used unless overridden via config in future.
@@ -86,7 +88,7 @@ private:
 
     //  Inter-frame state
     //  Only the previous centroid position is retained between
-    //  frames — needed solely to compute marker speed.
+    //  frames - needed solely to compute marker speed.
     //  All other processing is stateless per-frame.
 
     // Centroid position of the marker in the previous frame.
