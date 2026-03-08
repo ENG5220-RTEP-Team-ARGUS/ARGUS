@@ -63,4 +63,8 @@ struct VisionConfig {
 
     // Maximum permitted marker orientation angle in degrees.
     float orientationMax =  45.0f;
+
+    // ArUco dictionary used for marker detection.
+    // DICT_6X6_250 by default — change here without touching VisionProcessor.
+    int dictionaryId = cv::aruco::DICT_6X6_250;
 };
