@@ -75,7 +75,7 @@ private:
     // The ArUco marker dictionary to detect against.
     // Determined by config and created once at construction.
     // after
-    // TODO: verify OpenCV version on Pi - if < 4.7 revert to cv::Ptr<cv::aruco::Dictionary>
+    // TODO: verify OpenCV version on Pi -  if < 4.7 revert to cv::Ptr<cv::aruco::Dictionary>
     cv::aruco::Dictionary dictionary_;
 
     // Tunable detector parameters (thresholding, contour filtering, etc.).
