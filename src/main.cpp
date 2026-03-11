@@ -233,6 +233,8 @@ int runGuardianScenarioDemo() {
 
 int runLiveMarkerTest(const LiveTestOptions& options) {
     constexpr const char* kWindowName = "ARGUS Live Test";
+    constexpr int kLiveFreezeBadFrameThreshold = 30;  // ~1 second at ~30 FPS
+    constexpr int kLiveRecoverGoodFrameThreshold = 3;
 
     std::cout
         << "[LIVE_TEST] Starting live marker safety test mode\n"
@@ -243,6 +245,11 @@ int runLiveMarkerTest(const LiveTestOptions& options) {
         << (options.auto_ack ? "ON" : "OFF") << "\n"
         << "[LIVE_TEST] Controls: a=arm, d=disarm, q=quit\n"
         << "[LIVE_TEST] Starting in DISARMED setup mode\n"
+        << "[LIVE_TEST] Guardian thresholds: freeze after "
+        << kLiveFreezeBadFrameThreshold
+        << " consecutive bad frames, recover after "
+        << kLiveRecoverGoodFrameThreshold
+        << " consecutive good frames.\n"
         << "[LIVE_TEST] Focus debug enabled: FOCUS_SCORE (Laplacian variance), "
            "higher usually means sharper marker edges.\n";
 
@@ -276,7 +283,9 @@ int runLiveMarkerTest(const LiveTestOptions& options) {
     FreezeReason pending_reason = FreezeReason::UNKNOWN_FAULT;
 
     auto resetEnforcementState = [&]() {
-        guardian = std::make_unique<GuardianStateMachine>(2, 3);
+        guardian = std::make_unique<GuardianStateMachine>(
+            kLiveFreezeBadFrameThreshold,
+            kLiveRecoverGoodFrameThreshold);
         interlock = std::make_unique<RobotInterlock>(logging_hardware);
 
         guardian->setOnFreezeCallback([&]() {

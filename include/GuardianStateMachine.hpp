@@ -78,7 +78,7 @@ public:
     // Constructor with configurable thresholds:
     // fc = number of bad frames to trigger freeze
     // rc = number of good frames to clear freeze
-    GuardianStateMachine(int fc = 300, int rc = 3);    // Note: To be adjusted accordingly in future revisions
+    GuardianStateMachine(int fc = 30, int rc = 3);    // Note: To be adjusted accordingly in future revisions
     
     // Main function that processes incoming events
     void processEvent(GuardianEvent event);
