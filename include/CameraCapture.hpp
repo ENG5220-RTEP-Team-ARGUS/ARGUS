@@ -1,6 +1,7 @@
 #pragma once
 
 #include <opencv2/opencv.hpp>
+#include <string>
 
 // Structure representing the output data: frame object and its timestamp.
 struct FrameEvent {
@@ -24,4 +25,11 @@ public:
     // Populates output_event with the frame and a timestamp.
     // Returns true on success, false on failure or empty frame.
     bool waitForNextFrame(FrameEvent& output_event);
+
+    // Best-effort manual focus request.
+    // Returns true only if the backend accepted focus control.
+    bool setManualFocus(double focus_value);
+
+    // Returns backend name if open, otherwise "CLOSED".
+    std::string backendName() const;
 };

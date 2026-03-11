@@ -6,8 +6,10 @@
 #include <chrono>
 #include <cstdint>
 #include <exception>
+#include <iomanip>
 #include <iostream>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <thread>
 
@@ -17,6 +19,8 @@ struct LiveTestOptions {
     int camera_index = 0;
     int expected_marker_id = 23;
     bool auto_ack = false;
+    bool focus_value_provided = false;
+    double focus_value = 0.0;
 };
 
 void printUsage(const char* program_name) {
@@ -27,6 +31,7 @@ void printUsage(const char* program_name) {
         << "\nOptions for --live-test:\n"
         << "  --camera-index <n>        Camera index (default: 0)\n"
         << "  --expected-marker-id <n>  Expected ArUco marker ID (default: 23)\n"
+        << "  --focus-value <f>         Best-effort manual focus value\n"
         << "  --auto-ack                Auto-send operator acknowledge when frozen\n"
         << "  --help                    Show this message\n";
 }
@@ -44,6 +49,58 @@ bool parseIntArg(const char* text, int& value) {
     } catch (const std::exception&) {
         return false;
     }
+}
+
+bool parseDoubleArg(const char* text, double& value) {
+    try {
+        const std::string raw(text);
+        std::size_t parsed_count = 0;
+        const double parsed = std::stod(raw, &parsed_count);
+        if (parsed_count != raw.size()) {
+            return false;
+        }
+        value = parsed;
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+double computeFocusScore(const cv::Mat& image) {
+    if (image.empty()) {
+        return 0.0;
+    }
+
+    cv::Mat gray;
+    if (image.channels() == 1) {
+        gray = image;
+    } else {
+        cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
+    }
+
+    cv::Mat laplacian;
+    cv::Laplacian(gray, laplacian, CV_64F);
+    cv::Scalar mean;
+    cv::Scalar stddev;
+    cv::meanStdDev(laplacian, mean, stddev);
+    return stddev[0] * stddev[0];
+}
+
+const char* focusQualityLabel(double focus_score) {
+    // Heuristic bands for quick focus debugging.
+    if (focus_score < 60.0) {
+        return "BLURRY";
+    }
+    if (focus_score < 180.0) {
+        return "SOFT";
+    }
+    return "SHARP";
+}
+
+std::string formatFocusScore(double focus_score) {
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(1) << focus_score;
+    return oss.str();
 }
 
 const char* safetyStateToString(SafetyState state) {
@@ -185,10 +242,27 @@ int runLiveMarkerTest(const LiveTestOptions& options) {
         << "[LIVE_TEST] Auto operator ack: "
         << (options.auto_ack ? "ON" : "OFF") << "\n"
         << "[LIVE_TEST] Controls: a=arm, d=disarm, q=quit\n"
-        << "[LIVE_TEST] Starting in DISARMED setup mode\n";
+        << "[LIVE_TEST] Starting in DISARMED setup mode\n"
+        << "[LIVE_TEST] Focus debug enabled: FOCUS_SCORE (Laplacian variance), "
+           "higher usually means sharper marker edges.\n";
 
     CameraCapture camera_capture(options.camera_index);
     cv::namedWindow(kWindowName, cv::WINDOW_AUTOSIZE);
+
+    if (options.focus_value_provided) {
+        std::cout << "[LIVE_TEST] Requested manual focus value: "
+                  << options.focus_value << std::endl;
+        if (!camera_capture.setManualFocus(options.focus_value)) {
+            std::cout << "[LIVE_TEST] Manual focus was not accepted by backend "
+                      << camera_capture.backendName()
+                      << ". Use external camera controls and watch FOCUS_SCORE."
+                      << std::endl;
+        }
+    } else {
+        std::cout << "[LIVE_TEST] Tip: pass --focus-value <f> for best-effort "
+                     "manual focus if backend supports it."
+                  << std::endl;
+    }
 
     VisionConfig vision_config;
     vision_config.expectedMarkerId = options.expected_marker_id;
@@ -247,6 +321,8 @@ int runLiveMarkerTest(const LiveTestOptions& options) {
         const SafetyResult result =
             vision_processor.process(frame_event.image_data,
                                      std::chrono::steady_clock::now());
+        const double focus_score = computeFocusScore(frame_event.image_data);
+        const char* focus_quality = focusQualityLabel(focus_score);
 
         const bool frame_is_safe = (result.state == SafetyState::SAFE);
         if (!frame_is_safe) {
@@ -281,6 +357,8 @@ int runLiveMarkerTest(const LiveTestOptions& options) {
                   << " armed=" << (guardian_armed ? "YES" : "NO")
                   << " can_arm=" << (frame_is_safe ? "YES" : "NO")
                   << " vision=" << safetyStateToString(result.state)
+                  << " focus_score=" << formatFocusScore(focus_score)
+                  << " focus=" << focus_quality
                   << " guardian=" << guardian_state_text
                   << " interlock=" << interlock_state_text
                   << " freeze_reason=" << freeze_reason_text
@@ -347,6 +425,27 @@ int runLiveMarkerTest(const LiveTestOptions& options) {
                     cv::FONT_HERSHEY_SIMPLEX,
                     0.6,
                     cv::Scalar(180, 180, 180),
+                    1);
+
+        const cv::Scalar focus_color =
+            (focus_score < 60.0) ? cv::Scalar(0, 0, 255)
+                                 : ((focus_score < 180.0) ? cv::Scalar(0, 255, 255)
+                                                           : cv::Scalar(0, 255, 0));
+        cv::putText(display_frame,
+                    "FOCUS_SCORE: " + formatFocusScore(focus_score) + " (" +
+                        std::string(focus_quality) + ")",
+                    cv::Point(16, 215),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    focus_color,
+                    2);
+
+        cv::putText(display_frame,
+                    "Focus hint: adjust lens/ring until score rises and marker is stable",
+                    cv::Point(16, 240),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    cv::Scalar(200, 200, 200),
                     1);
 
         cv::imshow(kWindowName, display_frame);
@@ -421,6 +520,20 @@ int main(int argc, char* argv[]) {
 
         if (arg == "--auto-ack") {
             options.auto_ack = true;
+            continue;
+        }
+
+        if (arg == "--focus-value" && i + 1 < argc) {
+            double parsed_focus = 0.0;
+            if (!parseDoubleArg(argv[i + 1], parsed_focus)) {
+                std::cerr << "Invalid numeric value for --focus-value: "
+                          << argv[i + 1] << std::endl;
+                return 1;
+            }
+
+            options.focus_value_provided = true;
+            options.focus_value = parsed_focus;
+            ++i;
             continue;
         }
 
