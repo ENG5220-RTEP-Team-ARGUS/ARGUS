@@ -7,7 +7,7 @@ Current live-test pipeline:
 
 The project is currently focused on validating marker-based safety decisions in real camera tests on Raspberry Pi.
 
-## What ARGUS Does Today
+## What ARGUS does
 - Captures live camera frames.
 - Detects and validates an ArUco marker (expected ID check).
 - Evaluates safety using:
@@ -44,15 +44,15 @@ cmake --build build -j$(nproc)
 
 If CMake fails with `Could not find OpenCVConfig.cmake`, install/configure OpenCV dev packages so `find_package(OpenCV REQUIRED)` works.
 
-## Run Modes
-### 1) Guardian FSM Scenario Demo
+## Run modes
+### 1) Guardian FSM scenario demo
 Runs built-in state-machine scenarios (no live camera pipeline):
 
 ```bash
 ./build/ARGUS
 ```
 
-### 2) Live Marker Test (Camera + Vision + Guardian + Interlock)
+### 2) Live marker test (camera + vision + guardian + interlock)
 Recommended on Raspberry Pi:
 
 ```bash
@@ -65,7 +65,7 @@ Options:
 - `--auto-ack`: auto-send operator acknowledge when frozen (test convenience)
 - `--help`: print usage
 
-## Live-Test Controls (Window)
+## Live-test controls (window)
 When `--live-test` is running:
 - `a`: arm guardian enforcement (only allowed if current reading is safe)
 - `d`: disarm and return to setup/observation mode
@@ -78,7 +78,7 @@ In live mode, guardian thresholds are:
 - freeze after `30` consecutive bad frames (~1 second at ~30 FPS, to avoid freezing on brief blur/noise spikes)
 - recover after `3` consecutive good frames
 
-## Recommended Live-Test Workflow
+## Recommended live-test workflow
 1. Start in `DISARMED` mode.
 2. Position printed marker in view.
 3. Use `FOCUS_SCORE` and marker visibility to tune focus.
@@ -88,7 +88,7 @@ In live mode, guardian thresholds are:
 7. Press `d` to return to setup mode as needed.
 8. Press `q` to exit.
 
-## What You Should See
+## What you should see
 ### In terminal (per frame)
 - `armed=YES/NO`
 - `can_arm=YES/NO`
@@ -110,16 +110,16 @@ In live mode, guardian thresholds are:
   - `FOCUS_SCORE: ... (BLURRY/SOFT/SHARP)`
   - expected marker ID
 
-## Marker Notes
+## Marker notes
 - Default expected marker ID is `23`.
 - Vision uses ArUco dictionary `DICT_6X6_250` by default.
 - If your printed marker is different, pass `--expected-marker-id`.
 
-## Focus Notes
+## Focus notes
 - Focus debug is always shown in live test (`FOCUS_SCORE` in terminal + overlay).
 - `FOCUS_SCORE` is a quick sharpness heuristic (higher usually means sharper marker edges).
 
-## Camera Backend Notes (Raspberry Pi)
+## Camera backend notes (Raspberry Pi)
 - In `libcamerify` mode, capture enforces a V4L2-first open policy.
 - Startup logs show which backend/path was used.
 - If frames fail repeatedly, check:
@@ -135,6 +135,6 @@ v4l2-ctl --list-formats-ext -d /dev/video0
 libcamerify ./build/ARGUS --live-test --camera-index 0 --expected-marker-id 23
 ```
 
-## Safety Note
+## Safety note
 Live test mode is currently for software validation and operator workflow testing.
 It uses logging-oriented interlock behavior and does not require real motion actuation to validate decision flow.
