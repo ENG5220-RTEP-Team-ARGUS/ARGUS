@@ -174,6 +174,8 @@ int runGuardianScenarioDemo() {
 }
 
 int runLiveMarkerTest(const LiveTestOptions& options) {
+    constexpr const char* kWindowName = "ARGUS Live Test";
+
     std::cout
         << "[LIVE_TEST] Starting live marker safety test mode\n"
         << "[LIVE_TEST] Camera index: " << options.camera_index << "\n"
@@ -181,9 +183,10 @@ int runLiveMarkerTest(const LiveTestOptions& options) {
         << "\n"
         << "[LIVE_TEST] Auto operator ack: "
         << (options.auto_ack ? "ON" : "OFF") << "\n"
-        << "[LIVE_TEST] Stop with Ctrl+C\n";
+        << "[LIVE_TEST] Stop with Ctrl+C or press q in the window\n";
 
     CameraCapture camera_capture(options.camera_index);
+    cv::namedWindow(kWindowName, cv::WINDOW_AUTOSIZE);
 
     VisionConfig vision_config;
     vision_config.expectedMarkerId = options.expected_marker_id;
@@ -263,8 +266,66 @@ int runLiveMarkerTest(const LiveTestOptions& options) {
                   << " processing_us=" << result.processing_time.count()
                   << std::endl;
 
+        cv::Mat display_frame = frame_event.image_data.clone();
+        const bool decision_is_safe =
+            (result.state == SafetyState::SAFE) &&
+            (guardian.getState() == GuardianState::SAFE_MONITORING) &&
+            interlock.motionAllowed();
+        const cv::Scalar decision_color =
+            decision_is_safe ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 0, 255);
+
+        cv::putText(display_frame,
+                    std::string("VISION: ") + safetyStateToString(result.state),
+                    cv::Point(16, 30),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    cv::Scalar(255, 255, 255),
+                    2);
+
+        cv::putText(display_frame,
+                    std::string("GUARDIAN: ") + guardian.getCurrentStateString(),
+                    cv::Point(16, 60),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    cv::Scalar(255, 255, 255),
+                    2);
+
+        cv::putText(display_frame,
+                    std::string("INTERLOCK: ") +
+                        (interlock.motionAllowed() ? "MOTION_ALLOWED" : "FROZEN"),
+                    cv::Point(16, 90),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    cv::Scalar(255, 255, 255),
+                    2);
+
+        cv::putText(display_frame,
+                    decision_is_safe ? "SAFE" : "UNSAFE",
+                    cv::Point(16, 130),
+                    cv::FONT_HERSHEY_DUPLEX,
+                    1.0,
+                    decision_color,
+                    2);
+
+        cv::putText(display_frame,
+                    "Expected marker ID: " + std::to_string(options.expected_marker_id),
+                    cv::Point(16, 160),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    cv::Scalar(180, 180, 180),
+                    1);
+
+        cv::imshow(kWindowName, display_frame);
+        const int key = cv::waitKey(1);
+        if (key == 'q' || key == 'Q') {
+            std::cout << "[LIVE_TEST] Exit requested from display window (q)." << std::endl;
+            break;
+        }
+
         ++frame_index;
     }
+
+    cv::destroyWindow(kWindowName);
 
     if (!processed_any_frame) {
         std::cerr << "[LIVE_TEST] No frames processed. Check camera availability."
