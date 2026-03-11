@@ -71,6 +71,9 @@ CameraCapture::CameraCapture(int camera_index) {
     }
 
     if (cap.isOpened()) {
+        (void)cap.set(cv::CAP_PROP_FRAME_WIDTH, 640);
+        (void)cap.set(cv::CAP_PROP_FRAME_HEIGHT, 480);
+        (void)cap.set(cv::CAP_PROP_FPS, 30);
         (void)cap.set(cv::CAP_PROP_READ_TIMEOUT_MSEC, 2000);
     }
 }
