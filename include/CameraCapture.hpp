@@ -26,10 +26,6 @@ public:
     // Returns true on success, false on failure or empty frame.
     bool waitForNextFrame(FrameEvent& output_event);
 
-    // Best-effort manual focus request.
-    // Returns true only if the backend accepted focus control.
-    bool setManualFocus(double focus_value);
-
     // Returns backend name if open, otherwise "CLOSED".
     std::string backendName() const;
 };

@@ -182,29 +182,6 @@ bool CameraCapture::waitForNextFrame(FrameEvent& output_event) {
     return true;
 }
 
-bool CameraCapture::setManualFocus(double focus_value) {
-    if (!cap.isOpened()) {
-        std::cerr << "[CameraCapture] Cannot set focus: camera is not open."
-                  << std::endl;
-        return false;
-    }
-
-    const bool autofocus_disabled = cap.set(cv::CAP_PROP_AUTOFOCUS, 0);
-    const bool focus_set = cap.set(cv::CAP_PROP_FOCUS, focus_value);
-
-    if (!focus_set) {
-        std::cerr << "[CameraCapture] Manual focus not supported by backend "
-                  << backendName() << "." << std::endl;
-        return false;
-    }
-
-    std::cout << "[CameraCapture] Manual focus set to " << focus_value
-              << " (autofocus disable "
-              << (autofocus_disabled ? "accepted" : "not supported")
-              << ")." << std::endl;
-    return true;
-}
-
 std::string CameraCapture::backendName() const {
     if (!cap.isOpened()) {
         return "CLOSED";

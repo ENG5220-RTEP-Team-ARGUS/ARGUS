@@ -19,8 +19,6 @@ struct LiveTestOptions {
     int camera_index = 0;
     int expected_marker_id = 23;
     bool auto_ack = false;
-    bool focus_value_provided = false;
-    double focus_value = 0.0;
 };
 
 void printUsage(const char* program_name) {
@@ -31,7 +29,6 @@ void printUsage(const char* program_name) {
         << "\nOptions for --live-test:\n"
         << "  --camera-index <n>        Camera index (default: 0)\n"
         << "  --expected-marker-id <n>  Expected ArUco marker ID (default: 23)\n"
-        << "  --focus-value <f>         Best-effort manual focus value\n"
         << "  --auto-ack                Auto-send operator acknowledge when frozen\n"
         << "  --help                    Show this message\n";
 }
@@ -41,21 +38,6 @@ bool parseIntArg(const char* text, int& value) {
         const std::string raw(text);
         std::size_t parsed_count = 0;
         const int parsed = std::stoi(raw, &parsed_count);
-        if (parsed_count != raw.size()) {
-            return false;
-        }
-        value = parsed;
-        return true;
-    } catch (const std::exception&) {
-        return false;
-    }
-}
-
-bool parseDoubleArg(const char* text, double& value) {
-    try {
-        const std::string raw(text);
-        std::size_t parsed_count = 0;
-        const double parsed = std::stod(raw, &parsed_count);
         if (parsed_count != raw.size()) {
             return false;
         }
@@ -255,21 +237,6 @@ int runLiveMarkerTest(const LiveTestOptions& options) {
 
     CameraCapture camera_capture(options.camera_index);
     cv::namedWindow(kWindowName, cv::WINDOW_AUTOSIZE);
-
-    if (options.focus_value_provided) {
-        std::cout << "[LIVE_TEST] Requested manual focus value: "
-                  << options.focus_value << std::endl;
-        if (!camera_capture.setManualFocus(options.focus_value)) {
-            std::cout << "[LIVE_TEST] Manual focus was not accepted by backend "
-                      << camera_capture.backendName()
-                      << ". Use external camera controls and watch FOCUS_SCORE."
-                      << std::endl;
-        }
-    } else {
-        std::cout << "[LIVE_TEST] Tip: pass --focus-value <f> for best-effort "
-                     "manual focus if backend supports it."
-                  << std::endl;
-    }
 
     VisionConfig vision_config;
     vision_config.expectedMarkerId = options.expected_marker_id;
@@ -529,20 +496,6 @@ int main(int argc, char* argv[]) {
 
         if (arg == "--auto-ack") {
             options.auto_ack = true;
-            continue;
-        }
-
-        if (arg == "--focus-value" && i + 1 < argc) {
-            double parsed_focus = 0.0;
-            if (!parseDoubleArg(argv[i + 1], parsed_focus)) {
-                std::cerr << "Invalid numeric value for --focus-value: "
-                          << argv[i + 1] << std::endl;
-                return 1;
-            }
-
-            options.focus_value_provided = true;
-            options.focus_value = parsed_focus;
-            ++i;
             continue;
         }
 
