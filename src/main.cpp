@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <exception>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <thread>
 
@@ -183,7 +184,8 @@ int runLiveMarkerTest(const LiveTestOptions& options) {
         << "\n"
         << "[LIVE_TEST] Auto operator ack: "
         << (options.auto_ack ? "ON" : "OFF") << "\n"
-        << "[LIVE_TEST] Stop with Ctrl+C or press q in the window\n";
+        << "[LIVE_TEST] Controls: a=arm, d=disarm, q=quit\n"
+        << "[LIVE_TEST] Starting in DISARMED setup mode\n";
 
     CameraCapture camera_capture(options.camera_index);
     cv::namedWindow(kWindowName, cv::WINDOW_AUTOSIZE);
@@ -192,24 +194,32 @@ int runLiveMarkerTest(const LiveTestOptions& options) {
     vision_config.expectedMarkerId = options.expected_marker_id;
     VisionProcessor vision_processor(vision_config);
 
-    GuardianStateMachine guardian(2, 3);
     LoggingRobotHardware logging_hardware;
-    RobotInterlock interlock(logging_hardware);
+    std::unique_ptr<GuardianStateMachine> guardian;
+    std::unique_ptr<RobotInterlock> interlock;
+    bool guardian_armed = false;
 
     FreezeReason pending_reason = FreezeReason::UNKNOWN_FAULT;
 
-    guardian.setOnFreezeCallback([&]() {
-        interlock.onControlEvent(ControlEvent::FREEZE_NOW, pending_reason);
-    });
+    auto resetEnforcementState = [&]() {
+        guardian = std::make_unique<GuardianStateMachine>(2, 3);
+        interlock = std::make_unique<RobotInterlock>(logging_hardware);
 
-    guardian.setOnClearFreezeCallback([&]() {
-        interlock.onControlEvent(ControlEvent::ALLOW_MOTION);
-    });
+        guardian->setOnFreezeCallback([&]() {
+            interlock->onControlEvent(ControlEvent::FREEZE_NOW, pending_reason);
+        });
 
-    guardian.setOnStateChangeCallback([&](GuardianState from, GuardianState to) {
-        std::cout << "[GUARDIAN] " << guardian.stateToString(from) << " -> "
-                  << guardian.stateToString(to) << std::endl;
-    });
+        guardian->setOnClearFreezeCallback([&]() {
+            interlock->onControlEvent(ControlEvent::ALLOW_MOTION);
+        });
+
+        guardian->setOnStateChangeCallback([&](GuardianState from, GuardianState to) {
+            std::cout << "[GUARDIAN] " << guardian->stateToString(from) << " -> "
+                      << guardian->stateToString(to) << std::endl;
+        });
+    };
+
+    resetEnforcementState();
 
     FrameEvent frame_event;
     std::uint64_t frame_index = 0;
@@ -243,34 +253,47 @@ int runLiveMarkerTest(const LiveTestOptions& options) {
             pending_reason = mapSafetyToFreezeReason(result.state);
         }
 
-        guardian.processFrame(frame_is_safe ? FrameStatus::FRAME_GOOD
-                                            : FrameStatus::FRAME_BAD);
+        std::string guardian_state_text = "DISARMED_SETUP";
+        std::string interlock_state_text = "DISARMED";
+        std::string freeze_reason_text = "N/A";
 
-        if (options.auto_ack &&
-            guardian.getState() == GuardianState::FROZEN_UNSAFE) {
-            guardian.operatorAcknowledge();
-            interlock.operatorAcknowledge();
-            std::cout << "[LIVE_TEST] Operator acknowledge sent automatically"
-                      << std::endl;
+        if (guardian_armed) {
+            guardian->processFrame(frame_is_safe ? FrameStatus::FRAME_GOOD
+                                                 : FrameStatus::FRAME_BAD);
+
+            if (options.auto_ack &&
+                guardian->getState() == GuardianState::FROZEN_UNSAFE) {
+                guardian->operatorAcknowledge();
+                interlock->operatorAcknowledge();
+                std::cout << "[LIVE_TEST] Operator acknowledge sent automatically"
+                          << std::endl;
+            }
+
+            interlock->guardianHeartbeat(static_cast<std::uint32_t>(frame_index));
+
+            guardian_state_text = guardian->getCurrentStateString();
+            interlock_state_text =
+                interlock->motionAllowed() ? "MOTION_ALLOWED" : "FROZEN";
+            freeze_reason_text = freezeReasonToString(interlock->freezeReason());
         }
 
-        interlock.guardianHeartbeat(static_cast<std::uint32_t>(frame_index));
-
         std::cout << "[LIVE_TEST] frame=" << frame_index
+                  << " armed=" << (guardian_armed ? "YES" : "NO")
+                  << " can_arm=" << (frame_is_safe ? "YES" : "NO")
                   << " vision=" << safetyStateToString(result.state)
-                  << " guardian=" << guardian.getCurrentStateString()
-                  << " interlock="
-                  << (interlock.motionAllowed() ? "MOTION_ALLOWED" : "FROZEN")
-                  << " freeze_reason="
-                  << freezeReasonToString(interlock.freezeReason())
+                  << " guardian=" << guardian_state_text
+                  << " interlock=" << interlock_state_text
+                  << " freeze_reason=" << freeze_reason_text
                   << " processing_us=" << result.processing_time.count()
                   << std::endl;
 
         cv::Mat display_frame = frame_event.image_data.clone();
-        const bool decision_is_safe =
-            (result.state == SafetyState::SAFE) &&
-            (guardian.getState() == GuardianState::SAFE_MONITORING) &&
-            interlock.motionAllowed();
+        const bool decision_is_safe = guardian_armed
+                                          ? ((result.state == SafetyState::SAFE) &&
+                                             (guardian->getState() ==
+                                              GuardianState::SAFE_MONITORING) &&
+                                             interlock->motionAllowed())
+                                          : (result.state == SafetyState::SAFE);
         const cv::Scalar decision_color =
             decision_is_safe ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 0, 255);
 
@@ -283,7 +306,7 @@ int runLiveMarkerTest(const LiveTestOptions& options) {
                     2);
 
         cv::putText(display_frame,
-                    std::string("GUARDIAN: ") + guardian.getCurrentStateString(),
+                    std::string("GUARDIAN: ") + guardian_state_text,
                     cv::Point(16, 60),
                     cv::FONT_HERSHEY_SIMPLEX,
                     0.7,
@@ -291,8 +314,7 @@ int runLiveMarkerTest(const LiveTestOptions& options) {
                     2);
 
         cv::putText(display_frame,
-                    std::string("INTERLOCK: ") +
-                        (interlock.motionAllowed() ? "MOTION_ALLOWED" : "FROZEN"),
+                    std::string("INTERLOCK: ") + interlock_state_text,
                     cv::Point(16, 90),
                     cv::FONT_HERSHEY_SIMPLEX,
                     0.7,
@@ -300,8 +322,20 @@ int runLiveMarkerTest(const LiveTestOptions& options) {
                     2);
 
         cv::putText(display_frame,
-                    decision_is_safe ? "SAFE" : "UNSAFE",
-                    cv::Point(16, 130),
+                    std::string("CONTROL: ") +
+                        (guardian_armed ? "ARMED (d=disarm)" : "DISARMED (a=arm)") +
+                        " | CAN_ARM: " + (frame_is_safe ? "YES" : "NO"),
+                    cv::Point(16, 120),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    cv::Scalar(255, 255, 0),
+                    2);
+
+        cv::putText(display_frame,
+                    guardian_armed ? (decision_is_safe ? "SAFE" : "UNSAFE")
+                                   : (frame_is_safe ? "OBSERVED_SAFE"
+                                                    : "OBSERVED_UNSAFE"),
+                    cv::Point(16, 155),
                     cv::FONT_HERSHEY_DUPLEX,
                     1.0,
                     decision_color,
@@ -309,7 +343,7 @@ int runLiveMarkerTest(const LiveTestOptions& options) {
 
         cv::putText(display_frame,
                     "Expected marker ID: " + std::to_string(options.expected_marker_id),
-                    cv::Point(16, 160),
+                    cv::Point(16, 185),
                     cv::FONT_HERSHEY_SIMPLEX,
                     0.6,
                     cv::Scalar(180, 180, 180),
@@ -320,6 +354,35 @@ int runLiveMarkerTest(const LiveTestOptions& options) {
         if (key == 'q' || key == 'Q') {
             std::cout << "[LIVE_TEST] Exit requested from display window (q)." << std::endl;
             break;
+        }
+
+        if (key == 'a' || key == 'A') {
+            if (guardian_armed) {
+                std::cout << "[LIVE_TEST] ARM request ignored: guardian already armed."
+                          << std::endl;
+            } else if (!frame_is_safe) {
+                std::cout << "[LIVE_TEST] ARM request rejected: current observed condition is "
+                             "unsafe (vision="
+                          << safetyStateToString(result.state) << ")." << std::endl;
+            } else {
+                resetEnforcementState();
+                guardian_armed = true;
+                std::cout << "[LIVE_TEST] ARM accepted: guardian enforcement is now ACTIVE."
+                          << std::endl;
+            }
+        }
+
+        if (key == 'd' || key == 'D') {
+            if (!guardian_armed) {
+                std::cout << "[LIVE_TEST] DISARM request ignored: guardian already disarmed."
+                          << std::endl;
+            } else {
+                guardian_armed = false;
+                resetEnforcementState();
+                std::cout << "[LIVE_TEST] DISARM accepted: guardian enforcement is now INACTIVE "
+                             "(setup/observation mode)."
+                          << std::endl;
+            }
         }
 
         ++frame_index;
