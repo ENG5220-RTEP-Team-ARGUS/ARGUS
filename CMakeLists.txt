@@ -1,4 +1,3 @@
-set(OpenCV_DIR "C:/Users/patri/opencv/opencv/build")
 cmake_minimum_required(VERSION 3.10)
 project(ARGUS)
 
@@ -7,14 +6,18 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(OpenCV REQUIRED)
 
-include_directories(
-    include
-    ${OpenCV_INCLUDE_DIRS}
-)
-
 add_executable(ARGUS
     src/main.cpp
+    src/GuardianStateMachine.cpp
     src/VisionProcessor.cpp
+    src/CameraCapture.cpp
+    src/MotionController.cpp
+    src/RobotInterlock.cpp
+)
+
+target_include_directories(ARGUS PRIVATE
+    include
+    ${OpenCV_INCLUDE_DIRS}
 )
 
 target_link_libraries(ARGUS

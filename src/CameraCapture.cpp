@@ -2,10 +2,6 @@
 #include <chrono>
 #include <iostream>
 
-// =========================================================================
-// Class Implementation
-// =========================================================================
-
 CameraCapture::CameraCapture(int camera_index) {
     cap.open(camera_index);
 
@@ -43,46 +39,4 @@ bool CameraCapture::waitForNextFrame(FrameEvent& output_event) {
     ).count();
 
     return true;
-}
-
-// =========================================================================
-// Main Execution / Testing
-// =========================================================================
-
-// Stub representing the next module in the pipeline (Vision Safety Check).
-void visionSafetyCheckModule(const FrameEvent& frame_event) {
-    std::cout << "[Vision Safety Check] Received frame. Timestamp: "
-        << frame_event.timestamp_ms << " ms | Resolution: "
-        << frame_event.image_data.cols << "x" << frame_event.image_data.rows << std::endl;
-}
-
-int main() {
-    CameraCapture camera_capture(0);
-    FrameEvent current_frame_event;
-
-    // Main event loop, driven by the hardware frame rate.
-    while (true) {
-        // Blocks until the next frame is ready.
-        if (camera_capture.waitForNextFrame(current_frame_event)) {
-
-            // Passes the output data to the downstream module.
-            visionSafetyCheckModule(current_frame_event);
-
-            // Displays the frame for debugging purposes.
-            cv::imshow("Camera Source Preview", current_frame_event.image_data);
-
-            // Exits the loop if 'q' is pressed.
-            if (cv::waitKey(1) == 'q') {
-                break;
-            }
-        }
-        else {
-            // Exits the loop if the camera fails or disconnects.
-            break;
-        }
-    }
-
-    // Cleans up GUI windows before exiting.
-    cv::destroyAllWindows();
-    return 0;
 }

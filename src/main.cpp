@@ -1,187 +1,315 @@
-/*
-    GuardianStateMachine.hpp access to:
-    - GuardianStateMachine class
-    - FrameStatus enum (FRAME_GOOD / FRAME_BAD)
-    - GuardianState enum (SAFE_MONITORING / FROZEN_UNSAFE / RESET_PENDING)
-    - Callback setter methods
-*/
+#include "CameraCapture.hpp"
 #include "GuardianStateMachine.hpp"
+#include "RobotInterlock.hpp"
+#include "VisionProcessor.hpp"
+
+#include <chrono>
+#include <cstdint>
+#include <exception>
 #include <iostream>
+#include <string>
 
-/*
-    Callback: robotArmFreezeHandler()
+namespace {
 
-    Purpose:
-    - This simulates the robot arm would do when the guardian decides the environment is unsafe
-    - To execute motion such as:
-        - Emergency stop to motor drivers
-        - Disable PWM outputs
-        - Cut power relay
-        - Stop robot motion planning
+struct LiveTestOptions {
+    int camera_index = 0;
+    int expected_marker_id = 23;
+    bool auto_ack = false;
+};
 
-    Returns:
-    - Only print a message to show the callback was triggered
-*/
+void printUsage(const char* program_name) {
+    std::cout
+        << "Usage:\n"
+        << "  " << program_name << "                Run Guardian FSM scenario demo\n"
+        << "  " << program_name << " --live-test [options]\n"
+        << "\nOptions for --live-test:\n"
+        << "  --camera-index <n>        Camera index (default: 0)\n"
+        << "  --expected-marker-id <n>  Expected ArUco marker ID (default: 23)\n"
+        << "  --auto-ack                Auto-send operator acknowledge when frozen\n"
+        << "  --help                    Show this message\n";
+}
+
+bool parseIntArg(const char* text, int& value) {
+    try {
+        const std::string raw(text);
+        std::size_t parsed_count = 0;
+        const int parsed = std::stoi(raw, &parsed_count);
+        if (parsed_count != raw.size()) {
+            return false;
+        }
+        value = parsed;
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+const char* safetyStateToString(SafetyState state) {
+    switch (state) {
+        case SafetyState::SAFE:
+            return "SAFE";
+        case SafetyState::TOOL_NOT_DETECTED:
+            return "TOOL_NOT_DETECTED";
+        case SafetyState::OUTSIDE_ALLOWED_ZONE:
+            return "OUTSIDE_ALLOWED_ZONE";
+        case SafetyState::EXCESSIVE_SPEED:
+            return "EXCESSIVE_SPEED";
+        case SafetyState::INVALID_ORIENTATION:
+            return "INVALID_ORIENTATION";
+        default:
+            return "UNKNOWN";
+    }
+}
+
+FreezeReason mapSafetyToFreezeReason(SafetyState state) {
+    switch (state) {
+        case SafetyState::TOOL_NOT_DETECTED:
+            return FreezeReason::MARKER_LOST;
+        case SafetyState::OUTSIDE_ALLOWED_ZONE:
+            return FreezeReason::MARKER_OUT_OF_ROI;
+        case SafetyState::EXCESSIVE_SPEED:
+        case SafetyState::INVALID_ORIENTATION:
+            return FreezeReason::POSITION_ERROR;
+        case SafetyState::SAFE:
+        default:
+            return FreezeReason::UNKNOWN_FAULT;
+    }
+}
+
+const char* freezeReasonToString(FreezeReason reason) {
+    switch (reason) {
+        case FreezeReason::NONE:
+            return "NONE";
+        case FreezeReason::MARKER_LOST:
+            return "MARKER_LOST";
+        case FreezeReason::MARKER_OUT_OF_ROI:
+            return "MARKER_OUT_OF_ROI";
+        case FreezeReason::VISION_TIMEOUT:
+            return "VISION_TIMEOUT";
+        case FreezeReason::POSITION_ERROR:
+            return "POSITION_ERROR";
+        case FreezeReason::WATCHDOG_TIMEOUT:
+            return "WATCHDOG_TIMEOUT";
+        case FreezeReason::UNKNOWN_FAULT:
+        default:
+            return "UNKNOWN_FAULT";
+    }
+}
+
+class LoggingRobotHardware final : public RobotHardware {
+public:
+    void freezeMotion() noexcept override {
+        std::cout << "[INTERLOCK_HW] freezeMotion()" << std::endl;
+    }
+
+    void enableMotion() noexcept override {
+        std::cout << "[INTERLOCK_HW] enableMotion()" << std::endl;
+    }
+};
+
 void robotArmFreezeHandler() {
     std::cout << ">>> ROBOTIC ARM: Emergency stop activated! <<<" << std::endl;
 }
 
-
-/*
-    Callback: robotArmClearFreezeHandler()
-
-    Purpose:
-    - Simulates resuming robotic motion when the guardian decides it is safe again
-    - To execute motion such as:
-        - Re-enable motor control
-        - Reset and allow motion commands again
-*/
 void robotArmClearFreezeHandler() {
-    std::cout << ">>> ROBOTIC ARM: Motion resumed, system operational <<<" << std::endl;
+    std::cout << ">>> ROBOTIC ARM: Motion resumed, system operational <<<"
+              << std::endl;
 }
 
-
-/*
-    Callback: stateChangeHandler(from, to)
-
-    Purpose:
-    - Triggered whenever the state machine changes state
-
-    Parameters:
-    - from: previous state
-    - to: new state
-*/
 void stateChangeHandler(GuardianState from, GuardianState to) {
-    std::cout << ">>> STATE CHANGE NOTIFICATION: System transitioned <<<" << std::endl;
+    (void)from;
+    (void)to;
+    std::cout << ">>> STATE CHANGE NOTIFICATION: System transitioned <<<"
+              << std::endl;
 }
 
-
-/*
-    main()
-
-    Purpose:
-    - Entry point of the program
-    - Creates the GuardianStateMachine instance
-    - Registers callbacks
-    - Runs a sequence of test scenarios to validate logic
-*/
-int main() {
-    /*
-        Create a GuardianStateMachine object
-        Parameters:
-        - freezeCount = 2: freeze after 2 consecutive bad frames
-        - recoverCount = 3: clear freeze after 3 consecutive good frames
-
-        Safety meaning:
-        - freezeCount avoids freezing due to one noisy/false-positive bad frame
-        - recoverCount avoids resuming motion too early after operator acknowledgment, requiring stability before allowing motion again.
-    */
+int runGuardianScenarioDemo() {
     GuardianStateMachine guardian(2, 3);
+    guardian.setOnFreezeCallback(robotArmFreezeHandler);
+    guardian.setOnClearFreezeCallback(robotArmClearFreezeHandler);
+    guardian.setOnStateChangeCallback(stateChangeHandler);
 
-    // Register callback functions
-    guardian.setOnFreezeCallback(robotArmFreezeHandler);           // called when FREEZE_NOW happens
-    guardian.setOnClearFreezeCallback(robotArmClearFreezeHandler); // called when CLEAR_FREEZE happens
-    guardian.setOnStateChangeCallback(stateChangeHandler);         // called on state transitions
-
-    // Print a banner to show the beginning of tests
     std::cout << "\n========== GUARDIAN STATE MACHINE TEST ==========\n" << std::endl;
 
-    /*
-        Scenario 1: Normal Operation
-
-        Expected:
-        - Two good frames should keep the system in SAFE_MONITORING
-        - badCount remains 0
-        - motion remains allowed
-    */
     std::cout << "Scenario 1: Normal Operation" << std::endl;
-    guardian.processFrame(FrameStatus::FRAME_GOOD);   // Feed a good frame
-    guardian.processFrame(FrameStatus::FRAME_GOOD);   // Another good frame
-    guardian.printStatus();                           // Print state + counters
+    guardian.processFrame(FrameStatus::FRAME_GOOD);
+    guardian.processFrame(FrameStatus::FRAME_GOOD);
+    guardian.printStatus();
 
-    /*
-        Scenario 2: Single Bad Frame
-
-        Expected:
-        - A single bad frame increments badCount to 1
-        - Next good frame resets badCount to 0
-        - Should NOT freeze because freezeCount = 2
-    */
     std::cout << "Scenario 2: Single Bad Frame" << std::endl;
-    guardian.processFrame(FrameStatus::FRAME_BAD);  // badCount = 1 (below threshold freezeCount=2)
-    guardian.processFrame(FrameStatus::FRAME_GOOD);   // resets badCount back to 0
+    guardian.processFrame(FrameStatus::FRAME_BAD);
+    guardian.processFrame(FrameStatus::FRAME_GOOD);
     guardian.printStatus();
 
-    /*
-        Scenario 3: freezeCount Consecutive Bad Frames (Freeze)
-
-        Expected:
-        - Two consecutive bad frames → badCount reaches freezeCount=2
-        - Guardian transitions SAFE_MONITORING -> FROZEN_UNSAFE
-        - FREEZE_NOW action triggers:
-            - motionBlocked = true
-            - robotArmFreezeHandler() called
-    */
-    std::cout << "Scenario 3: freezeCount Consecutive Bad Frames (Freeze)" << std::endl;
-    guardian.processFrame(FrameStatus::FRAME_BAD);  // badCount = 1
-    guardian.processFrame(FrameStatus::FRAME_BAD);  // badCount = 2 -> freeze triggered
+    std::cout << "Scenario 3: freezeCount Consecutive Bad Frames (Freeze)"
+              << std::endl;
+    guardian.processFrame(FrameStatus::FRAME_BAD);
+    guardian.processFrame(FrameStatus::FRAME_BAD);
     guardian.printStatus();
 
-    /*
-        Scenario 4: Frames During Frozen State
-
-        Expected:
-        - Even if frames become GOOD, the system should NOT automatically unfreeze, it stays frozen until operator acknowledgment
-        - This is a safety-critical design principle as automatic restart is dangerous
-    */
     std::cout << "Scenario 4: Frames During Frozen State" << std::endl;
-    guardian.processFrame(FrameStatus::FRAME_GOOD);   // Still frozen
-    guardian.processFrame(FrameStatus::FRAME_GOOD);   // Still frozen
+    guardian.processFrame(FrameStatus::FRAME_GOOD);
+    guardian.processFrame(FrameStatus::FRAME_GOOD);
     guardian.printStatus();
 
-    /*
-        Scenario 5: Operator Acknowledgment
-
-        Expected:
-        - OPERATOR_ACK moves state from FROZEN_UNSAFE -> RESET_PENDING
-        - Still frozen (motionBlocked remains true)
-        - Now the guardian begins counting good frames
-    */
     std::cout << "Scenario 5: Operator Acknowledgment/Reset" << std::endl;
-    guardian.operatorAcknowledge();            // Human acknowledges unsafe condition
+    guardian.operatorAcknowledge();
     guardian.printStatus();
 
-    /*
-        Scenario 6: Bad Frame During Reset
-
-        Expected:
-        - In RESET_PENDING, guardian counts consecutive good frames
-        - If a bad frame occurs, goodCount resets to 0
-        - This prevents “false recovery” when environment becomes unstable again
-    */
     std::cout << "Scenario 6: Bad Frame During Reset" << std::endl;
-    guardian.processFrame(FrameStatus::FRAME_GOOD);   // goodCount = 1
-    guardian.processFrame(FrameStatus::FRAME_BAD);  // goodCount reset to 0
+    guardian.processFrame(FrameStatus::FRAME_GOOD);
+    guardian.processFrame(FrameStatus::FRAME_BAD);
     guardian.printStatus();
 
-    /*
-        Scenario 7: recoverCount Consecutive Good Frames (Clear Freeze)
-
-        Expected:
-        - Need 3 consecutive good frames (recoverCount=3) to recover
-        - After third good frame:
-            - state RESET_PENDING -> SAFE_MONITORING
-            - CLEAR_FREEZE action triggers:
-                - motionBlocked = false
-                - robotArmClearFreezeHandler() called
-            - counters reset to 0
-    */
-    std::cout << "Scenario 7: recoverCount Consecutive Good Frames (Clear Freeze)" << std::endl;
-    guardian.processFrame(FrameStatus::FRAME_GOOD);   // goodCount = 1
-    guardian.processFrame(FrameStatus::FRAME_GOOD);   // goodCount = 2
-    guardian.processFrame(FrameStatus::FRAME_GOOD);   // goodCount = 3 -> clear freeze and resume
+    std::cout << "Scenario 7: recoverCount Consecutive Good Frames (Clear Freeze)"
+              << std::endl;
+    guardian.processFrame(FrameStatus::FRAME_GOOD);
+    guardian.processFrame(FrameStatus::FRAME_GOOD);
+    guardian.processFrame(FrameStatus::FRAME_GOOD);
     guardian.printStatus();
 
-    std::cout << "========== TEST COMPLETE ==========\n" << std::endl;  // Print messages to show tests have completed
+    std::cout << "========== TEST COMPLETE ==========\n" << std::endl;
     return 0;
+}
+
+int runLiveMarkerTest(const LiveTestOptions& options) {
+    std::cout
+        << "[LIVE_TEST] Starting live marker safety test mode\n"
+        << "[LIVE_TEST] Camera index: " << options.camera_index << "\n"
+        << "[LIVE_TEST] Expected marker ID: " << options.expected_marker_id
+        << "\n"
+        << "[LIVE_TEST] Auto operator ack: "
+        << (options.auto_ack ? "ON" : "OFF") << "\n"
+        << "[LIVE_TEST] Stop with Ctrl+C\n";
+
+    CameraCapture camera_capture(options.camera_index);
+
+    VisionConfig vision_config;
+    vision_config.expectedMarkerId = options.expected_marker_id;
+    VisionProcessor vision_processor(vision_config);
+
+    GuardianStateMachine guardian(2, 3);
+    LoggingRobotHardware logging_hardware;
+    RobotInterlock interlock(logging_hardware);
+
+    FreezeReason pending_reason = FreezeReason::UNKNOWN_FAULT;
+
+    guardian.setOnFreezeCallback([&]() {
+        interlock.onControlEvent(ControlEvent::FREEZE_NOW, pending_reason);
+    });
+
+    guardian.setOnClearFreezeCallback([&]() {
+        interlock.onControlEvent(ControlEvent::ALLOW_MOTION);
+    });
+
+    guardian.setOnStateChangeCallback([&](GuardianState from, GuardianState to) {
+        std::cout << "[GUARDIAN] " << guardian.stateToString(from) << " -> "
+                  << guardian.stateToString(to) << std::endl;
+    });
+
+    FrameEvent frame_event;
+    std::uint64_t frame_index = 0;
+    bool processed_any_frame = false;
+
+    while (camera_capture.waitForNextFrame(frame_event)) {
+        processed_any_frame = true;
+
+        const SafetyResult result =
+            vision_processor.process(frame_event.image_data,
+                                     std::chrono::steady_clock::now());
+
+        const bool frame_is_safe = (result.state == SafetyState::SAFE);
+        if (!frame_is_safe) {
+            pending_reason = mapSafetyToFreezeReason(result.state);
+        }
+
+        guardian.processFrame(frame_is_safe ? FrameStatus::FRAME_GOOD
+                                            : FrameStatus::FRAME_BAD);
+
+        if (options.auto_ack &&
+            guardian.getState() == GuardianState::FROZEN_UNSAFE) {
+            guardian.operatorAcknowledge();
+            interlock.operatorAcknowledge();
+            std::cout << "[LIVE_TEST] Operator acknowledge sent automatically"
+                      << std::endl;
+        }
+
+        interlock.guardianHeartbeat(static_cast<std::uint32_t>(frame_index));
+
+        std::cout << "[LIVE_TEST] frame=" << frame_index
+                  << " vision=" << safetyStateToString(result.state)
+                  << " guardian=" << guardian.getCurrentStateString()
+                  << " interlock="
+                  << (interlock.motionAllowed() ? "MOTION_ALLOWED" : "FROZEN")
+                  << " freeze_reason="
+                  << freezeReasonToString(interlock.freezeReason())
+                  << " processing_us=" << result.processing_time.count()
+                  << std::endl;
+
+        ++frame_index;
+    }
+
+    if (!processed_any_frame) {
+        std::cerr << "[LIVE_TEST] No frames processed. Check camera availability."
+                  << std::endl;
+        return 1;
+    }
+
+    std::cerr << "[LIVE_TEST] Frame stream ended." << std::endl;
+    return 0;
+}
+
+}  // namespace
+
+int main(int argc, char* argv[]) {
+    bool run_live_test = false;
+    LiveTestOptions options;
+
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg(argv[i]);
+
+        if (arg == "--help") {
+            printUsage(argv[0]);
+            return 0;
+        }
+
+        if (arg == "--live-test") {
+            run_live_test = true;
+            continue;
+        }
+
+        if (arg == "--auto-ack") {
+            options.auto_ack = true;
+            continue;
+        }
+
+        if ((arg == "--camera-index" || arg == "--expected-marker-id") &&
+            i + 1 < argc) {
+            int parsed_value = 0;
+            if (!parseIntArg(argv[i + 1], parsed_value)) {
+                std::cerr << "Invalid numeric value for " << arg << ": "
+                          << argv[i + 1] << std::endl;
+                return 1;
+            }
+
+            if (arg == "--camera-index") {
+                options.camera_index = parsed_value;
+            } else {
+                options.expected_marker_id = parsed_value;
+            }
+
+            ++i;
+            continue;
+        }
+
+        std::cerr << "Unknown or incomplete argument: " << arg << std::endl;
+        printUsage(argv[0]);
+        return 1;
+    }
+
+    if (run_live_test) {
+        return runLiveMarkerTest(options);
+    }
+
+    return runGuardianScenarioDemo();
 }
