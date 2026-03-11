@@ -1,5 +1,6 @@
 #include "CameraCapture.hpp"
 #include <chrono>
+#include <cstdlib>
 #include <functional>
 #include <iostream>
 #include <string>
@@ -34,20 +35,49 @@ bool tryOpen(cv::VideoCapture& cap,
     return true;
 }
 
+bool isLibcamerifyActive() {
+    const char* ld_preload = std::getenv("LD_PRELOAD");
+    if (ld_preload == nullptr) {
+        return false;
+    }
+
+    const std::string preload(ld_preload);
+    return preload.find("v4l2-compat") != std::string::npos ||
+           preload.find("libcamerify") != std::string::npos ||
+           preload.find("libcamera") != std::string::npos;
+}
+
 }  // namespace
 
 CameraCapture::CameraCapture(int camera_index) {
-    // Prefer V4L2 first. On many Pi setups this is the most stable OpenCV path.
-    bool opened = tryOpen(cap, "V4L2 index " + std::to_string(camera_index), [&]() {
-            return cap.open(camera_index, cv::CAP_V4L2);
-        });
-
-    if (!opened) {
-        opened = tryOpen(cap, "default backend index " + std::to_string(camera_index),
-                         [&]() { return cap.open(camera_index); });
+    const bool libcamerify_active = isLibcamerifyActive();
+    if (libcamerify_active) {
+        std::cout << "[CameraCapture] libcamerify detected via LD_PRELOAD. "
+                     "Prioritising default backend."
+                  << std::endl;
     }
 
-    if (!opened) {
+    bool opened = false;
+    if (libcamerify_active) {
+        opened = tryOpen(cap, "default backend index " + std::to_string(camera_index),
+                         [&]() { return cap.open(camera_index); });
+        if (!opened) {
+            opened = tryOpen(cap, "V4L2 index " + std::to_string(camera_index), [&]() {
+                return cap.open(camera_index, cv::CAP_V4L2);
+            });
+        }
+    } else {
+        // Default path when not wrapped by libcamerify.
+        opened = tryOpen(cap, "V4L2 index " + std::to_string(camera_index), [&]() {
+            return cap.open(camera_index, cv::CAP_V4L2);
+        });
+        if (!opened) {
+            opened = tryOpen(cap, "default backend index " + std::to_string(camera_index),
+                             [&]() { return cap.open(camera_index); });
+        }
+    }
+
+    if (!opened && !libcamerify_active) {
         const std::vector<std::string> pipelines = buildLibcameraPipelines();
         for (std::size_t index = 0; index < pipelines.size() && !opened; ++index) {
             const std::string label =
@@ -59,8 +89,14 @@ CameraCapture::CameraCapture(int camera_index) {
     }
 
     if (!opened) {
-        std::cerr << "ERROR: Cannot open camera. Tried V4L2, default backend, and libcamerasrc."
-                  << std::endl;
+        if (libcamerify_active) {
+            std::cerr << "ERROR: Cannot open camera in libcamerify mode "
+                         "(tried default backend and V4L2)."
+                      << std::endl;
+        } else {
+            std::cerr << "ERROR: Cannot open camera. Tried V4L2, default backend, and libcamerasrc."
+                      << std::endl;
+        }
     }
 
     // Sets the internal buffer size to 1 to ensure the latest frame is fetched,
