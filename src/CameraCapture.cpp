@@ -47,23 +47,46 @@ bool isLibcamerifyActive() {
            preload.find("libcamera") != std::string::npos;
 }
 
+std::string buildV4l2DevicePath(int camera_index) {
+    return "/dev/video" + std::to_string(camera_index);
+}
+
 }  // namespace
 
 CameraCapture::CameraCapture(int camera_index) {
     const bool libcamerify_active = isLibcamerifyActive();
     if (libcamerify_active) {
         std::cout << "[CameraCapture] libcamerify detected via LD_PRELOAD. "
-                     "Prioritising default backend."
+                     "Enforcing V4L2-first camera open policy."
                   << std::endl;
     }
 
     bool opened = false;
     if (libcamerify_active) {
-        opened = tryOpen(cap, "default backend index " + std::to_string(camera_index),
-                         [&]() { return cap.open(camera_index); });
+        const std::string device_path = buildV4l2DevicePath(camera_index);
+        opened = tryOpen(cap, "V4L2 device path " + device_path, [&]() {
+            return cap.open(device_path, cv::CAP_V4L2);
+        });
         if (!opened) {
             opened = tryOpen(cap, "V4L2 index " + std::to_string(camera_index), [&]() {
                 return cap.open(camera_index, cv::CAP_V4L2);
+            });
+        }
+        if (!opened) {
+            opened = tryOpen(cap, "default backend index " + std::to_string(camera_index), [&]() {
+                if (!cap.open(camera_index)) {
+                    return false;
+                }
+
+                if (cap.getBackendName() == "GSTREAMER") {
+                    std::cerr << "[CameraCapture] Default backend resolved to GSTREAMER under "
+                                 "libcamerify; rejecting and continuing with V4L2-only policy."
+                              << std::endl;
+                    cap.release();
+                    return false;
+                }
+
+                return true;
             });
         }
     } else {
