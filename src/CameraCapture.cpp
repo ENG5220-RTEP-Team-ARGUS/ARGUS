@@ -3,14 +3,19 @@
 #include <functional>
 #include <iostream>
 #include <string>
+#include <thread>
+#include <vector>
 
 namespace {
 
-std::string buildLibcameraPipeline() {
-    // Keep a small, explicit pipeline for Pi/libcamera + OpenCV appsink.
-    return "libcamerasrc ! video/x-raw,width=640,height=480,framerate=30/1 "
-           "! videoconvert ! video/x-raw,format=BGR ! "
-           "appsink drop=true max-buffers=1 sync=false";
+std::vector<std::string> buildLibcameraPipelines() {
+    // Ordered from stricter caps to more permissive fallback.
+    return {
+        "libcamerasrc ! video/x-raw,format=NV12,width=640,height=480,framerate=30/1 "
+        "! videoconvert ! appsink drop=true max-buffers=1 sync=false",
+        "libcamerasrc ! video/x-raw,width=640,height=480,framerate=30/1 "
+        "! videoconvert ! appsink drop=true max-buffers=1 sync=false",
+        "libcamerasrc ! videoconvert ! appsink drop=true max-buffers=1 sync=false"};
 }
 
 bool tryOpen(cv::VideoCapture& cap,
@@ -32,20 +37,29 @@ bool tryOpen(cv::VideoCapture& cap,
 }  // namespace
 
 CameraCapture::CameraCapture(int camera_index) {
-    const std::string libcamera_pipeline = buildLibcameraPipeline();
-
-    const bool opened =
-        tryOpen(cap, "GStreamer/libcamerasrc", [&]() {
-            return cap.open(libcamera_pipeline, cv::CAP_GSTREAMER);
-        }) ||
-        tryOpen(cap, "V4L2 index " + std::to_string(camera_index), [&]() {
+    // Prefer V4L2 first. On many Pi setups this is the most stable OpenCV path.
+    bool opened = tryOpen(cap, "V4L2 index " + std::to_string(camera_index), [&]() {
             return cap.open(camera_index, cv::CAP_V4L2);
-        }) ||
-        tryOpen(cap, "default backend index " + std::to_string(camera_index),
-                [&]() { return cap.open(camera_index); });
+        });
 
     if (!opened) {
-        std::cerr << "ERROR: Cannot open camera. Tried libcamerasrc, V4L2, and default backend."
+        opened = tryOpen(cap, "default backend index " + std::to_string(camera_index),
+                         [&]() { return cap.open(camera_index); });
+    }
+
+    if (!opened) {
+        const std::vector<std::string> pipelines = buildLibcameraPipelines();
+        for (std::size_t index = 0; index < pipelines.size() && !opened; ++index) {
+            const std::string label =
+                "GStreamer/libcamerasrc pipeline " + std::to_string(index + 1);
+            opened = tryOpen(cap, label, [&]() {
+                return cap.open(pipelines[index], cv::CAP_GSTREAMER);
+            });
+        }
+    }
+
+    if (!opened) {
+        std::cerr << "ERROR: Cannot open camera. Tried V4L2, default backend, and libcamerasrc."
                   << std::endl;
     }
 
@@ -54,6 +68,10 @@ CameraCapture::CameraCapture(int camera_index) {
     if (cap.isOpened() && !cap.set(cv::CAP_PROP_BUFFERSIZE, 1)) {
         std::cerr << "[CameraCapture] Warning: CAP_PROP_BUFFERSIZE unsupported by backend."
                   << std::endl;
+    }
+
+    if (cap.isOpened()) {
+        (void)cap.set(cv::CAP_PROP_READ_TIMEOUT_MSEC, 2000);
     }
 }
 
@@ -66,12 +84,30 @@ CameraCapture::~CameraCapture() {
 bool CameraCapture::waitForNextFrame(FrameEvent& output_event) {
     if (!cap.isOpened()) return false;
 
-    // Blocks the thread until the hardware provides the next frame.
-    cap >> output_event.image_data;
+    // Tolerate occasional empty grabs from camera backends before declaring failure.
+    constexpr int kMaxReadAttempts = 4;
+    output_event.image_data.release();
+    for (int attempt = 0; attempt < kMaxReadAttempts; ++attempt) {
+        if (!cap.read(output_event.image_data)) {
+            output_event.image_data.release();
+        }
+
+        if (!output_event.image_data.empty()) {
+            break;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
 
     // Checks for valid frame data.
     if (output_event.image_data.empty()) {
-        std::cerr << "WARNING: Empty frame captured." << std::endl;
+        std::cerr << "WARNING: Empty frame captured (backend: ";
+        if (cap.isOpened()) {
+            std::cerr << cap.getBackendName();
+        } else {
+            std::cerr << "closed";
+        }
+        std::cerr << ")." << std::endl;
         return false;
     }
 

@@ -8,6 +8,7 @@
 #include <exception>
 #include <iostream>
 #include <string>
+#include <thread>
 
 namespace {
 
@@ -210,8 +211,24 @@ int runLiveMarkerTest(const LiveTestOptions& options) {
     FrameEvent frame_event;
     std::uint64_t frame_index = 0;
     bool processed_any_frame = false;
+    int consecutive_capture_failures = 0;
 
-    while (camera_capture.waitForNextFrame(frame_event)) {
+    while (true) {
+        if (!camera_capture.waitForNextFrame(frame_event)) {
+            ++consecutive_capture_failures;
+            std::cerr << "[LIVE_TEST] Frame capture failed ("
+                      << consecutive_capture_failures
+                      << "/30). Retrying..." << std::endl;
+
+            if (consecutive_capture_failures >= 30) {
+                break;
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            continue;
+        }
+
+        consecutive_capture_failures = 0;
         processed_any_frame = true;
 
         const SafetyResult result =
