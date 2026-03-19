@@ -204,7 +204,3 @@ All public classes and interfaces are documented using Doxygen.
 - [ ] Full robotic system integration
 - [ ] Improved latency optimisation
 
-https://www.instagram.com/argus102026/
-https://www.youtube.com/@argus-w3g
-https://www.linkedin.com/company/a-r-g-u-s
-
