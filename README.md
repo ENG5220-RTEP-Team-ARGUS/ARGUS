@@ -167,6 +167,7 @@ All public classes and interfaces are documented using Doxygen.
 -  [Instagram](https://www.instagram.com/argus102026/)
 -  [YouTube](https://www.youtube.com/@argus-w3g)
 -  [LinkedIn](https://www.linkedin.com/company/a-r-g-u-s)
+-  [TikTok](https://www.tiktok.com/@argusxisx61?_r=1&_t=ZN-95E4anYeInm)
 
 ### Platform Performance Summary
 ---
