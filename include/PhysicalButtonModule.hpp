@@ -12,8 +12,8 @@
 // the existing guardian/interlock flow.
 //
 // Current wired button:
-// BCM GPIO24 (physical pin 18), active-low input, internal pull-up enabled,
-// software debounce.
+// BCM GPIO24 (physical pin 18), active-low input, GPIO character-device
+// request with pull-up bias, software debounce.
 enum class PhysicalButtonEvent {
     ARM_REQUEST,
     DISARM_REQUEST,
@@ -31,6 +31,7 @@ struct PhysicalButtonConfig {
 class PhysicalButtonModule {
 public:
     PhysicalButtonModule();
+    ~PhysicalButtonModule();
     explicit PhysicalButtonModule(const PhysicalButtonConfig& config);
 
     bool available() const noexcept;
@@ -45,6 +46,8 @@ private:
         std::optional<int> gpio;
         PhysicalButtonEvent event;
         std::string value_path;
+        std::string device_path;
+        int line_fd = -1;
         bool active = false;
         bool initialised = false;
         bool last_sample_pressed = false;

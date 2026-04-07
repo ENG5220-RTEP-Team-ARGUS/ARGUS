@@ -149,14 +149,14 @@ This is the first end-to-end hardware demo on the Pi.
 or, if you prefer to invoke the binary directly:
 
 ```bash
-libcamerify ./build/ARGUS --full-demo --camera-index 0 --expected-marker-id 23
+sudo -E ./build/ARGUS --full-demo --camera-index 0 --expected-marker-id 23
 ```
 
 Convenience wrapper:
 - `scripts/full_demo.sh`
 
-The wrapper self-elevates with `sudo` if needed because the current physical ACK
-button backend writes to `/sys/class/gpio`.
+The wrapper self-elevates with `sudo` if needed because the physical ACK button
+backend needs access to the GPIO character device.
 
 What it does:
 - waits for a safe camera view
@@ -233,9 +233,9 @@ Environment variables:
 - `ARGUS_BUTTON_ACTIVE_LOW` (`1` by default)
 - `ARGUS_BUTTON_DEBOUNCE_MS` (`50` by default)
 
-The module reads GPIO `value` files under `/sys/class/gpio/gpio<N>/value` and only emits
-debounced press events. On startup it will try to export the GPIO line and set it to
-input mode if needed; the pull-up still has to be configured by the board/pinmux setup.
+The module requests the GPIO line through `/dev/gpiochip*` using the Linux GPIO
+character-device ABI and only emits debounced press events. It requests input mode
+and prefers pull-up bias for the active-low ACK line.
 
 In live mode, guardian thresholds are:
 - freeze after `30` consecutive bad frames (~1 second at ~30 FPS, to avoid freezing on brief blur/noise spikes)
