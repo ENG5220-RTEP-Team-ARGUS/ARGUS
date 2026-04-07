@@ -10,6 +10,10 @@
 // debounced, press-edge events that tell AppController what the operator
 // wants the system to do. AppController must still route the request through
 // the existing guardian/interlock flow.
+//
+// Current wired button:
+// BCM GPIO24 (physical pin 18), active-low input, internal pull-up enabled,
+// software debounce.
 enum class PhysicalButtonEvent {
     ARM_REQUEST,
     DISARM_REQUEST,

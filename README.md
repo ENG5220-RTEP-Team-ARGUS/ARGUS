@@ -76,30 +76,36 @@ When `--live-test` is running:
 System starts in `DISARMED` setup mode by default.
 
 ## Physical button module
-The live controller can also poll optional GPIO-backed operator buttons. The module is
-semantic, not direct-control: it emits requests that AppController routes through the
-existing guardian/interlock flow.
+The live controller can poll a GPIO-backed operator button. The wired button on the
+current hardware is a single active-low acknowledge input:
+
+- BCM GPIO24, physical pin 18
+- one side of the button to GPIO24
+- the other side to GND
+- internal pull-up enabled at the board/pinmux level
+- software debounce enabled in the module
 
 Event contract:
-- `ARM_REQUEST`: request to enter armed enforcement mode. AppController still freezes
-  motion through `RobotInterlock` before arming.
-- `DISARM_REQUEST`: request to leave armed enforcement mode. AppController still freezes
-  motion through `RobotInterlock` before disarming.
-- `ACK_REQUEST`: request to acknowledge a frozen state. AppController still calls the
-  guardian/interlock acknowledgement path and waits for the normal reset/recovery logic.
+- `ACK_REQUEST`: debounced press edge from the physical button. AppController still
+  calls the guardian/interlock acknowledgement path and waits for the normal
+  reset/recovery logic.
 
-GPIO configuration is optional. If none of the pins below are set, the module stays
-disabled and the keyboard controls remain available.
+The button module remains semantic, not direct-control: it emits requests that
+AppController routes through the existing guardian/interlock flow.
+
+GPIO configuration is optional for overrides. The wired ACK input defaults to GPIO24,
+and the module will disable itself if that line is unavailable at runtime.
 
 Environment variables:
-- `ARGUS_BUTTON_ARM_GPIO`
-- `ARGUS_BUTTON_DISARM_GPIO`
-- `ARGUS_BUTTON_ACK_GPIO`
+- `ARGUS_BUTTON_ACK_GPIO` (defaults to `24` for the wired button)
+- `ARGUS_BUTTON_ARM_GPIO` and `ARGUS_BUTTON_DISARM_GPIO` are optional extras if you
+  later add more operator buttons
 - `ARGUS_BUTTON_ACTIVE_LOW` (`1` by default)
 - `ARGUS_BUTTON_DEBOUNCE_MS` (`50` by default)
 
 The module reads GPIO `value` files under `/sys/class/gpio/gpio<N>/value` and only emits
-debounced press events.
+debounced press events. On startup it will try to export the GPIO line and set it to
+input mode if needed; the pull-up still has to be configured by the board/pinmux setup.
 
 In live mode, guardian thresholds are:
 - freeze after `30` consecutive bad frames (~1 second at ~30 FPS, to avoid freezing on brief blur/noise spikes)

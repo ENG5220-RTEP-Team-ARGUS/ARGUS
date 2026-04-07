@@ -5,8 +5,16 @@
 #include <cstdlib>
 #include <fstream>
 #include <limits>
+#include <thread>
+
+#include <unistd.h>
 
 namespace {
+
+constexpr int kDefaultAckGpio = 24;
+constexpr const char* kGpioExportPath = "/sys/class/gpio/export";
+constexpr int kGpioExportRetryCount = 10;
+constexpr int kGpioExportRetryDelayMs = 10;
 
 bool parseBoolText(const char* text, bool default_value) noexcept {
     if (text == nullptr) {
@@ -25,6 +33,41 @@ bool parseBoolText(const char* text, bool default_value) noexcept {
         return false;
     }
     return default_value;
+}
+
+bool pathExists(const std::string& path) noexcept {
+    return ::access(path.c_str(), R_OK) == 0;
+}
+
+bool writeTextFile(const std::string& path, const std::string& value) noexcept {
+    std::ofstream output(path);
+    if (!output.is_open()) {
+        return false;
+    }
+
+    output << value;
+    output.flush();
+    return output.good();
+}
+
+bool prepareGpioInputLine(int gpio, const std::string& value_path) noexcept {
+    if (!pathExists(value_path)) {
+        (void)writeTextFile(kGpioExportPath, std::to_string(gpio));
+        for (int attempt = 0;
+             attempt < kGpioExportRetryCount && !pathExists(value_path);
+             ++attempt) {
+            std::this_thread::sleep_for(
+                std::chrono::milliseconds(kGpioExportRetryDelayMs));
+        }
+    }
+
+    if (!pathExists(value_path)) {
+        return false;
+    }
+
+    const std::string direction_path =
+        "/sys/class/gpio/gpio" + std::to_string(gpio) + "/direction";
+    return writeTextFile(direction_path, "in");
 }
 
 }  // namespace
@@ -72,7 +115,8 @@ PhysicalButtonConfig PhysicalButtonModule::configFromEnvironment() noexcept {
     PhysicalButtonConfig config;
     config.arm_gpio = parseEnvInt("ARGUS_BUTTON_ARM_GPIO");
     config.disarm_gpio = parseEnvInt("ARGUS_BUTTON_DISARM_GPIO");
-    config.acknowledge_gpio = parseEnvInt("ARGUS_BUTTON_ACK_GPIO");
+    config.acknowledge_gpio =
+        parseEnvInt("ARGUS_BUTTON_ACK_GPIO").value_or(kDefaultAckGpio);
     config.active_low = parseEnvBool("ARGUS_BUTTON_ACTIVE_LOW", true);
     config.debounce =
         parseEnvDuration("ARGUS_BUTTON_DEBOUNCE_MS", std::chrono::milliseconds(50));
@@ -145,6 +189,11 @@ void PhysicalButtonModule::initialiseChannel(ChannelState& channel,
     }
 
     channel.value_path = makeValuePath(*gpio);
+    if (!prepareGpioInputLine(*gpio, channel.value_path)) {
+        last_error_ = std::string("unable to prepare ") + channel.value_path;
+        return;
+    }
+
     bool pressed = false;
     if (!readPressedState(channel, pressed)) {
         last_error_ = std::string("unable to read ") + channel.value_path;
