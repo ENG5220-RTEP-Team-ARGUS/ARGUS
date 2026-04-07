@@ -189,18 +189,18 @@ What it does:
 - stays in a pre-arm observation state until the scene is safe
 - lets the operator arm/start the demo only when the scene is safe
 - after arm, runs the dance and uses the normal safe-again + ACK recovery path on later freezes
-- then runs a conservative repeating dance:
-  - `BASE +15`
-  - `BASE -15`
+- then runs a repeating dance:
+  - `BASE +90`
+  - `BASE -90`
   - `HOME`
-  - `LOWER +10`
-  - `LOWER -10`
+  - `LOWER +90`
+  - `LOWER -90`
   - `HOME`
-  - `UPPER +10`
-  - `UPPER -10`
+  - `UPPER +90`
+  - `UPPER -90`
   - `HOME`
-  - `GRIP +10`
-  - `GRIP -10`
+  - `GRIP +90`
+  - `GRIP -90`
   - `HOME`
 
 Behavior:
