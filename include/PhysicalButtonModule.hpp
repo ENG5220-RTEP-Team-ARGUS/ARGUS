@@ -37,6 +37,7 @@ public:
     bool available() const noexcept;
     bool poll(PhysicalButtonEvent& event) noexcept;
     const char* lastErrorString() const noexcept;
+    const char* statusString() const noexcept;
 
     static PhysicalButtonConfig configFromEnvironment() noexcept;
     static const char* eventToString(PhysicalButtonEvent event) noexcept;
@@ -61,6 +62,7 @@ private:
     ChannelState acknowledge_channel_;
     bool available_ = false;
     std::string last_error_;
+    std::string status_string_;
 
     static std::optional<int> parseEnvInt(const char* name) noexcept;
     static bool parseEnvBool(const char* name, bool default_value) noexcept;

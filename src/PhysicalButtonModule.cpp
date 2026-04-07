@@ -65,6 +65,10 @@ std::string boundedCString(const char* text, std::size_t max_length) {
     return std::string(text, ::strnlen(text, max_length));
 }
 
+bool equalsInsensitive(const std::string& lhs, const std::string& rhs) {
+    return toLowerCopy(lhs) == toLowerCopy(rhs);
+}
+
 struct GpioChipCandidate {
     std::string path;
     std::string name;
@@ -72,6 +76,13 @@ struct GpioChipCandidate {
     unsigned int lines = 0;
     int preference = 1;
 };
+
+std::vector<std::string> buildLineNameCandidates(int gpio) {
+    return {
+        "GPIO" + std::to_string(gpio),
+        "gpio" + std::to_string(gpio),
+    };
+}
 
 int chipPreference(const GpioChipCandidate& candidate) {
     if (containsInsensitive(candidate.label, "pinctrl") ||
@@ -152,7 +163,7 @@ std::uint64_t makeFallbackLineFlags(bool active_low) {
 }
 
 bool requestLineFromChip(const std::string& chip_path,
-                         int gpio,
+                         int line_offset,
                          std::uint64_t flags,
                          int& line_fd,
                          std::string& error_text) noexcept {
@@ -165,7 +176,7 @@ bool requestLineFromChip(const std::string& chip_path,
     }
 
     gpio_v2_line_request request{};
-    request.offsets[0] = static_cast<std::uint32_t>(gpio);
+    request.offsets[0] = static_cast<std::uint32_t>(line_offset);
     request.num_lines = 1;
     request.config.flags = flags;
     request.config.num_attrs = 0;
@@ -180,10 +191,43 @@ bool requestLineFromChip(const std::string& chip_path,
     }
 
     const int saved_errno = errno;
-    error_text = chip_path + " line " + std::to_string(gpio) +
+    error_text = chip_path + " line " + std::to_string(line_offset) +
                  ": " + std::strerror(saved_errno);
     ::close(chip_fd);
     return false;
+}
+
+std::optional<int> findNamedLineOffset(const GpioChipCandidate& chip, int gpio) {
+    const std::vector<std::string> target_names = buildLineNameCandidates(gpio);
+
+    int chip_fd = ::open(chip.path.c_str(), O_RDONLY | O_CLOEXEC);
+    if (chip_fd < 0) {
+        return std::nullopt;
+    }
+
+    std::optional<int> resolved_offset;
+    for (unsigned int offset = 0; offset < chip.lines; ++offset) {
+        gpio_v2_line_info info{};
+        info.offset = offset;
+        if (::ioctl(chip_fd, GPIO_V2_GET_LINEINFO_IOCTL, &info) != 0) {
+            continue;
+        }
+
+        const std::string line_name = boundedCString(info.name, sizeof(info.name));
+        for (const std::string& target_name : target_names) {
+            if (equalsInsensitive(line_name, target_name)) {
+                resolved_offset = static_cast<int>(offset);
+                break;
+            }
+        }
+
+        if (resolved_offset.has_value()) {
+            break;
+        }
+    }
+
+    ::close(chip_fd);
+    return resolved_offset;
 }
 
 bool requestButtonLine(int gpio,
@@ -205,18 +249,21 @@ bool requestButtonLine(int gpio,
             continue;
         }
 
+        const int requested_offset =
+            findNamedLineOffset(chip, gpio).value_or(gpio);
         std::string attempt_error;
         if (requestLineFromChip(chip.path,
-                                gpio,
+                                requested_offset,
                                 preferred_flags,
                                 line_fd,
                                 attempt_error) ||
             requestLineFromChip(chip.path,
-                                gpio,
+                                requested_offset,
                                 fallback_flags,
                                 line_fd,
                                 attempt_error)) {
-            device_path = chip.path;
+            device_path = chip.path + " line GPIO" + std::to_string(gpio) +
+                          " (offset " + std::to_string(requested_offset) + ")";
             error_text.clear();
             return true;
         }
@@ -263,6 +310,11 @@ PhysicalButtonModule::PhysicalButtonModule(const PhysicalButtonConfig& config)
                       PhysicalButtonEvent::ACK_REQUEST);
 
     available_ = acknowledge_channel_.active;
+    if (acknowledge_channel_.active) {
+        status_string_ = acknowledge_channel_.device_path +
+                         ", debounce=" + std::to_string(config_.debounce.count()) +
+                         "ms";
+    }
     if (!available_ && last_error_.empty()) {
         last_error_ = "acknowledge button not configured";
     }
@@ -285,6 +337,13 @@ const char* PhysicalButtonModule::lastErrorString() const noexcept {
         return "no error";
     }
     return last_error_.c_str();
+}
+
+const char* PhysicalButtonModule::statusString() const noexcept {
+    if (status_string_.empty()) {
+        return "no status";
+    }
+    return status_string_.c_str();
 }
 
 PhysicalButtonConfig PhysicalButtonModule::configFromEnvironment() noexcept {

@@ -620,8 +620,8 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
         << "[DEMO] sequence HOME -> BASE +/-15 -> LOWER +/-10 -> UPPER +/-10 -> GRIP +/-10\n"
         << "[DEMO] freeze after 1 bad frame, recover after 3 good frames\n"
         << "[DEMO] safe scene required before arm/start\n"
-        << "[DEMO] ACK button = arm/start before motion, ACK after freeze\n"
-        << "[DEMO] controls: a=arm, r=ack, q=quit\n";
+        << "[DEMO] physical button = continue (arm/start or resume)\n"
+        << "[DEMO] controls: a=continue, r=continue, q=quit\n";
 
     if (!motion_controller_.initialise(kDefaultI2cDevicePath,
                                        kDefaultPca9685Address,
@@ -638,6 +638,14 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
     VisionProcessor vision_processor(vision_config);
     CameraCapture camera_capture(options.camera_index);
     PhysicalButtonModule button_module;
+    std::cout << "[DEMO] physical button module: "
+              << (button_module.available() ? "configured" : "disabled");
+    if (button_module.available()) {
+        std::cout << " (" << button_module.statusString() << ")";
+    } else {
+        std::cout << " (" << button_module.lastErrorString() << ")";
+    }
+    std::cout << std::endl;
     if (!button_module.available()) {
         std::cerr << "[DEMO] physical ACK button unavailable: "
                   << button_module.lastErrorString() << std::endl;
@@ -758,14 +766,18 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
         return interlock.state() != InterlockState::FAULT;
     };
 
+    auto requestContinue = [&]() -> bool {
+        return demo_armed ? requestAcknowledge() : requestArm();
+    };
+
     auto requestFromButton = [&](PhysicalButtonEvent event) -> bool {
         std::cout << "[BUTTON] " << PhysicalButtonModule::eventToString(event)
                   << std::endl;
         switch (event) {
             case PhysicalButtonEvent::ACK_REQUEST:
-                return demo_armed ? requestAcknowledge() : requestArm();
+                return requestContinue();
             case PhysicalButtonEvent::ARM_REQUEST:
-                return requestArm();
+                return requestContinue();
             case PhysicalButtonEvent::DISARM_REQUEST:
                 std::cout << "[DEMO] button ignored" << std::endl;
                 return true;
@@ -1024,13 +1036,13 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
             break;
         }
         if (key == 'a' || key == 'A') {
-            if (!requestArm()) {
+            if (!requestContinue()) {
                 motion_faulted = true;
                 break;
             }
         }
         if (key == 'r' || key == 'R') {
-            if (!requestAcknowledge()) {
+            if (!requestContinue()) {
                 motion_faulted = true;
                 break;
             }
@@ -1125,9 +1137,12 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
     PhysicalButtonModule button_module;
     std::cout << "[LIVE_TEST] Physical button module: "
               << (button_module.available() ? "configured" : "disabled");
-    const char* button_module_status = button_module.lastErrorString();
+    const char* button_module_status =
+        button_module.available() ? button_module.statusString()
+                                  : button_module.lastErrorString();
     if (button_module_status != nullptr &&
-        std::string(button_module_status) != "no error") {
+        std::string(button_module_status) != "no error" &&
+        std::string(button_module_status) != "no status") {
         std::cout << " (" << button_module_status << ")";
     }
     std::cout << std::endl;

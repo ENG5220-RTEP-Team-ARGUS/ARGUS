@@ -182,10 +182,10 @@ What it does:
 
 Behavior:
 - before arm, the window shows whether the scene is safe and ready to arm
-- press `a` or the physical ACK button to arm/start the demo once the scene is safe
+- press `a`, `r`, or the physical button to continue once the scene is safe
 - freeze immediately when the ArUco marker is lost
 - when the marker is visible again, the app logs `safe again` and `waiting for ACK`
-- press the physical ACK button to continue the normal recovery path
+- press `a`, `r`, or the physical button to continue the normal recovery path
 - motion resumes only after the guardian reaches its safe state again
 - `--auto-ack` is intentionally disabled in this mode
 
@@ -201,8 +201,8 @@ Expected terminal messages are short:
 - `resume`
 
 Window control:
-- `a`: arm/start the full demo when the scene is safe
-- `r`: acknowledge after a freeze once the scene is safe again
+- `a`: continue the full demo
+- `r`: continue the full demo
 - `q`: quit the full demo
 
 If the ACK button module is unavailable, the demo exits early because this mode
@@ -233,9 +233,9 @@ Event contract:
   calls the guardian/interlock acknowledgement path and waits for the normal
   reset/recovery logic.
 
-In `--full-demo`, the same physical `ACK_REQUEST` is interpreted as `arm/start`
-before the demo is armed. Once armed, it reverts to its normal acknowledge role
-for freeze recovery.
+In `--full-demo`, the same physical `ACK_REQUEST` is treated as a single
+`continue` action: before the demo is armed it means `arm/start`, and after a
+freeze it means `acknowledge and resume` once the scene is safe again.
 
 The button module remains semantic, not direct-control: it emits requests that
 AppController routes through the existing guardian/interlock flow.
