@@ -138,7 +138,30 @@ step constants in `src/AppController.cpp` and rerun the smoke test.
 If the motion controller faults at any step, the mode shuts down the outputs and exits
 without continuing the sequence.
 
-### 4) Full pipeline hardware demo
+### 4) Physical button test
+Runs the GPIO-backed physical button module by itself, without camera or motion.
+
+```bash
+./scripts/test_button.sh
+```
+
+or directly:
+
+```bash
+sudo -E ./build/ARGUS --button-test
+```
+
+What it prints:
+- the exact gpiochip/line binding used for the ACK button
+- the initial raw line state: `PRESSED` or `RELEASED`
+- raw state changes as you press and release the button
+- debounced semantic events such as `event=ACK_REQUEST`
+
+If the raw state never changes, the problem is wiring, pull-up, or wrong GPIO line.
+If the raw state changes but no `ACK_REQUEST` appears, the problem is debounce/event
+handling.
+
+### 5) Full pipeline hardware demo
 Runs camera + vision + guardian + interlock + motion through the normal safety path.
 This is the first end-to-end hardware demo on the Pi.
 

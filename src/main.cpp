@@ -10,10 +10,12 @@ void printUsage(const char* program_name) {
     std::cout
         << "Usage:\n"
         << "  " << program_name << "                Run Guardian FSM scenario demo\n"
+        << "  " << program_name << " --button-test\n"
         << "  " << program_name << " --full-demo [options]\n"
         << "  " << program_name << " --motion-smoke-test [options]\n"
         << "  " << program_name << " --live-test [options]\n"
         << "\nOptions:\n"
+        << "  --button-test             Run a GPIO button diagnostic loop\n"
         << "  --full-demo               Run the full pipeline demo (camera + vision + guardian + interlock + motion)\n"
         << "  --motion-smoke-test       Run the motion-only servo smoke test (all joints by default)\n"
         << "  --base                    Smoke-test only the base servo\n"
@@ -66,6 +68,7 @@ bool parseIntArg(const char* text, int& value) {
 }  // namespace
 
 int main(int argc, char* argv[]) {
+    bool run_button_test = false;
     bool run_live_test = false;
     bool run_full_demo = false;
     bool run_motion_smoke_test = false;
@@ -83,6 +86,11 @@ int main(int argc, char* argv[]) {
 
         if (arg == "--live-test") {
             run_live_test = true;
+            continue;
+        }
+
+        if (arg == "--button-test") {
+            run_button_test = true;
             continue;
         }
 
@@ -136,10 +144,13 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    if ((run_live_test && run_full_demo) ||
+    if ((run_button_test && run_live_test) ||
+        (run_button_test && run_full_demo) ||
+        (run_button_test && run_motion_smoke_test) ||
+        (run_live_test && run_full_demo) ||
         (run_live_test && run_motion_smoke_test) ||
         (run_full_demo && run_motion_smoke_test)) {
-        std::cerr << "Choose exactly one mode: --full-demo, --live-test, or --motion-smoke-test."
+        std::cerr << "Choose exactly one mode: --button-test, --full-demo, --live-test, or --motion-smoke-test."
                   << std::endl;
         printUsage(argv[0]);
         return 1;
@@ -153,6 +164,10 @@ int main(int argc, char* argv[]) {
     }
 
     AppController app_controller;
+    if (run_button_test) {
+        return app_controller.runButtonTest();
+    }
+
     if (run_motion_smoke_test) {
         return app_controller.runMotionSmokeTest(smoke_options);
     }

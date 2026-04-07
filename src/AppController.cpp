@@ -477,6 +477,57 @@ int AppController::runGuardianScenarioDemo() {
     return 0;
 }
 
+int AppController::runButtonTest() {
+    PhysicalButtonModule button_module;
+    std::cout << "[BUTTON_TEST] physical button test\n"
+              << "[BUTTON_TEST] press Ctrl+C to stop\n"
+              << "[BUTTON_TEST] module: "
+              << (button_module.available() ? "configured" : "disabled");
+    if (button_module.available()) {
+        std::cout << " (" << button_module.statusString() << ")";
+    } else {
+        std::cout << " (" << button_module.lastErrorString() << ")";
+    }
+    std::cout << std::endl;
+
+    if (!button_module.available()) {
+        return 1;
+    }
+
+    bool pressed = false;
+    if (!button_module.readAcknowledgePressed(pressed)) {
+        std::cerr << "[BUTTON_TEST] initial read failed: "
+                  << button_module.lastErrorString() << std::endl;
+        return 1;
+    }
+
+    bool last_pressed = pressed;
+    std::cout << "[BUTTON_TEST] state="
+              << (pressed ? "PRESSED" : "RELEASED") << std::endl;
+
+    while (true) {
+        if (!button_module.readAcknowledgePressed(pressed)) {
+            std::cerr << "[BUTTON_TEST] read failed: "
+                      << button_module.lastErrorString() << std::endl;
+            return 1;
+        }
+
+        if (pressed != last_pressed) {
+            last_pressed = pressed;
+            std::cout << "[BUTTON_TEST] state="
+                      << (pressed ? "PRESSED" : "RELEASED") << std::endl;
+        }
+
+        PhysicalButtonEvent event;
+        while (button_module.poll(event)) {
+            std::cout << "[BUTTON_TEST] event="
+                      << PhysicalButtonModule::eventToString(event) << std::endl;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+}
+
 int AppController::runMotionSmokeTest(const MotionSmokeTestOptions& options) {
     std::cout
         << "[SMOKE] joint=" << smokeJointSelectionToString(options.joint)

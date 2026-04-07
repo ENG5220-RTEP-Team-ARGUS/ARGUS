@@ -244,13 +244,9 @@ bool requestButtonLine(int gpio,
     const std::uint64_t preferred_flags = makePreferredLineFlags(active_low);
     const std::uint64_t fallback_flags = makeFallbackLineFlags(active_low);
 
-    for (const GpioChipCandidate& chip : chips) {
-        if (gpio < 0 || static_cast<unsigned int>(gpio) >= chip.lines) {
-            continue;
-        }
-
-        const int requested_offset =
-            findNamedLineOffset(chip, gpio).value_or(gpio);
+    auto tryResolvedRequest = [&](const GpioChipCandidate& chip,
+                                  int requested_offset,
+                                  const char* resolution_label) {
         std::string attempt_error;
         if (requestLineFromChip(chip.path,
                                 requested_offset,
@@ -262,13 +258,36 @@ bool requestButtonLine(int gpio,
                                 fallback_flags,
                                 line_fd,
                                 attempt_error)) {
-            device_path = chip.path + " line GPIO" + std::to_string(gpio) +
-                          " (offset " + std::to_string(requested_offset) + ")";
+            device_path = chip.path + " " + resolution_label + " GPIO" +
+                          std::to_string(gpio) + " (offset " +
+                          std::to_string(requested_offset) + ")";
             error_text.clear();
             return true;
         }
 
         error_text = attempt_error;
+        return false;
+    };
+
+    for (const GpioChipCandidate& chip : chips) {
+        const std::optional<int> named_offset = findNamedLineOffset(chip, gpio);
+        if (!named_offset.has_value()) {
+            continue;
+        }
+
+        if (tryResolvedRequest(chip, *named_offset, "named")) {
+            return true;
+        }
+    }
+
+    for (const GpioChipCandidate& chip : chips) {
+        if (gpio < 0 || static_cast<unsigned int>(gpio) >= chip.lines) {
+            continue;
+        }
+
+        if (tryResolvedRequest(chip, gpio, "raw-offset")) {
+            return true;
+        }
     }
 
     if (error_text.empty()) {
@@ -312,6 +331,9 @@ PhysicalButtonModule::PhysicalButtonModule(const PhysicalButtonConfig& config)
     available_ = acknowledge_channel_.active;
     if (acknowledge_channel_.active) {
         status_string_ = acknowledge_channel_.device_path +
+                         ", initial=" +
+                         std::string(acknowledge_channel_.stable_pressed ? "PRESSED"
+                                                                         : "RELEASED") +
                          ", debounce=" + std::to_string(config_.debounce.count()) +
                          "ms";
     }
@@ -330,6 +352,20 @@ bool PhysicalButtonModule::poll(PhysicalButtonEvent& event) noexcept {
     return sampleChannel(disarm_channel_, now, event) ||
            sampleChannel(acknowledge_channel_, now, event) ||
            sampleChannel(arm_channel_, now, event);
+}
+
+bool PhysicalButtonModule::readAcknowledgePressed(bool& pressed) noexcept {
+    if (!acknowledge_channel_.active) {
+        return false;
+    }
+
+    if (!readPressedState(acknowledge_channel_, pressed)) {
+        last_error_ = std::string("unable to read ") + acknowledge_channel_.device_path +
+                      " (" + acknowledge_channel_.value_path + ")";
+        return false;
+    }
+
+    return true;
 }
 
 const char* PhysicalButtonModule::lastErrorString() const noexcept {

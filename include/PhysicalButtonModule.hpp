@@ -36,6 +36,7 @@ public:
 
     bool available() const noexcept;
     bool poll(PhysicalButtonEvent& event) noexcept;
+    bool readAcknowledgePressed(bool& pressed) noexcept;
     const char* lastErrorString() const noexcept;
     const char* statusString() const noexcept;
 
