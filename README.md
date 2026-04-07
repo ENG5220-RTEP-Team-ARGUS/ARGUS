@@ -149,14 +149,15 @@ This is the first end-to-end hardware demo on the Pi.
 or, if you prefer to invoke the binary directly:
 
 ```bash
-sudo -E ./build/ARGUS --full-demo --camera-index 0 --expected-marker-id 23
+sudo -E libcamerify ./build/ARGUS --full-demo --camera-index 0 --expected-marker-id 23
 ```
 
 Convenience wrapper:
 - `scripts/full_demo.sh`
 
 The wrapper self-elevates with `sudo` if needed because the physical ACK button
-backend needs access to the GPIO character device.
+backend needs access to the GPIO character device, and it will use `libcamerify`
+when available so camera capture stays on the known-good V4L2 path.
 
 What it does:
 - waits for a safe camera view

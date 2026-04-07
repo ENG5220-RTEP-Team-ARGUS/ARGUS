@@ -1,4 +1,5 @@
 #include "CameraCapture.hpp"
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <functional>
@@ -13,10 +14,13 @@ std::vector<std::string> buildLibcameraPipelines() {
     // Ordered from stricter caps to more permissive fallback.
     return {
         "libcamerasrc ! video/x-raw,format=NV12,width=640,height=480,framerate=30/1 "
-        "! videoconvert ! appsink drop=true max-buffers=1 sync=false",
+        "! videoconvert ! video/x-raw,format=BGR "
+        "! appsink drop=true max-buffers=1 sync=false",
         "libcamerasrc ! video/x-raw,width=640,height=480,framerate=30/1 "
-        "! videoconvert ! appsink drop=true max-buffers=1 sync=false",
-        "libcamerasrc ! videoconvert ! appsink drop=true max-buffers=1 sync=false"};
+        "! videoconvert ! video/x-raw,format=BGR "
+        "! appsink drop=true max-buffers=1 sync=false",
+        "libcamerasrc ! videoconvert ! video/x-raw,format=BGR "
+        "! appsink drop=true max-buffers=1 sync=false"};
 }
 
 bool tryOpen(cv::VideoCapture& cap,
@@ -72,11 +76,6 @@ CameraCapture::CameraCapture(int camera_index) {
                 return cap.open(camera_index, cv::CAP_V4L2);
             });
         }
-        if (!opened) {
-            opened = tryOpen(cap, "default backend index " + std::to_string(camera_index), [&]() {
-                return cap.open(camera_index);
-            });
-        }
     } else {
         // Default path when not wrapped by libcamerify.
         opened = tryOpen(cap, "V4L2 index " + std::to_string(camera_index), [&]() {
@@ -88,7 +87,7 @@ CameraCapture::CameraCapture(int camera_index) {
         }
     }
 
-    if (!opened) {
+    if (!opened && !libcamerify_active) {
         const std::vector<std::string> pipelines = buildLibcameraPipelines();
         for (std::size_t index = 0; index < pipelines.size() && !opened; ++index) {
             const std::string label =
@@ -102,7 +101,7 @@ CameraCapture::CameraCapture(int camera_index) {
     if (!opened) {
         if (libcamerify_active) {
             std::cerr << "ERROR: Cannot open camera in libcamerify mode "
-                         "(tried default backend and V4L2)."
+                         "(tried /dev/videoN and V4L2 index only)."
                       << std::endl;
         } else {
             std::cerr << "ERROR: Cannot open camera. Tried V4L2, default backend, and libcamerasrc."
