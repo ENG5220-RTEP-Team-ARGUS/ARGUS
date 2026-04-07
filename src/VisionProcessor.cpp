@@ -107,13 +107,13 @@ SafetyResult VisionProcessor::process(
     std::vector<std::vector<cv::Point2f>> markerCorners;
 
     // OpenCV analyses the frame - thresholds it, finds square contours,
-    // reads the binary pattern inside each square — and populates
+    // reads the binary pattern inside each square - and populates
     // markerCorners and markerIds with whatever it finds.
     detector_.detectMarkers(frame, markerCorners, markerIds, rejected_);
 
     // Stage 2: Early exit if nothing detected 
     //
-    // Quick empty check before searching — avoids iterating an empty vector.
+    // Quick empty check before searching - avoids iterating an empty vector.
     if (markerIds.empty()) {
         hasPrevious_ = false;
         return makeResult(SafetyState::TOOL_NOT_DETECTED);
