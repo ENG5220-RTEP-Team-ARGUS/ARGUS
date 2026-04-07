@@ -78,6 +78,7 @@ mechanical binding.
 ```
 
 Convenience wrappers are also provided:
+- `scripts/smoke_all.sh`
 - `scripts/smoke_base.sh`
 - `scripts/smoke_lower.sh`
 - `scripts/smoke_upper.sh`
