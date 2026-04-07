@@ -161,9 +161,11 @@ when available so camera capture stays on the known-good V4L2 path.
 
 What it does:
 - waits for a safe camera view
+- opens a small debug window showing vision, guardian, interlock, pose, and demo state
 - stages `HOME`
-- primes a single freeze so the physical ACK button can start motion through the normal guardian/interlock recovery path
-- the first physical ACK starts the dance; later freezes use the same safe-again + ACK recovery
+- stays in a pre-arm observation state until the scene is safe
+- lets the operator arm/start the demo only when the scene is safe
+- after arm, runs the dance and uses the normal safe-again + ACK recovery path on later freezes
 - then runs a conservative repeating dance:
   - `BASE +15`
   - `BASE -15`
@@ -179,6 +181,8 @@ What it does:
   - `HOME`
 
 Behavior:
+- before arm, the window shows whether the scene is safe and ready to arm
+- press `a` or the physical ACK button to arm/start the demo once the scene is safe
 - freeze immediately when the ArUco marker is lost
 - when the marker is visible again, the app logs `safe again` and `waiting for ACK`
 - press the physical ACK button to continue the normal recovery path
@@ -187,11 +191,19 @@ Behavior:
 
 Expected terminal messages are short:
 - `pose=HOME`
+- `safe and ready to arm`
+- `ARM accepted -> running`
+- `scene unsafe`
 - `freeze: MARKER_LOST`
 - `safe again`
 - `waiting for ACK`
 - `ACK accepted -> recovery`
 - `resume`
+
+Window control:
+- `a`: arm/start the full demo when the scene is safe
+- `r`: acknowledge after a freeze once the scene is safe again
+- `q`: quit the full demo
 
 If the ACK button module is unavailable, the demo exits early because this mode
 requires the physical button.
@@ -220,6 +232,10 @@ Event contract:
 - `ACK_REQUEST`: debounced press edge from the physical button. AppController still
   calls the guardian/interlock acknowledgement path and waits for the normal
   reset/recovery logic.
+
+In `--full-demo`, the same physical `ACK_REQUEST` is interpreted as `arm/start`
+before the demo is armed. Once armed, it reverts to its normal acknowledge role
+for freeze recovery.
 
 The button module remains semantic, not direct-control: it emits requests that
 AppController routes through the existing guardian/interlock flow.
