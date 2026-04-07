@@ -3,7 +3,7 @@ A.R.G.U.S. (Adaptive Real-time Guardian for Unsafe Situations) is a vision-based
 
 Current live-test pipeline:
 
-`CameraCapture -> VisionProcessor -> GuardianStateMachine -> RobotInterlock`
+`AppController -> CameraCapture -> VisionProcessor -> GuardianStateMachine -> RobotInterlock -> MotionController`
 
 The project is currently focused on validating marker-based safety decisions in real camera tests on Raspberry Pi.
 
@@ -97,6 +97,7 @@ In live mode, guardian thresholds are:
 - `focus=BLURRY/SOFT/SHARP`
 - `guardian=...`
 - `interlock=...`
+- `motion_ctrl=...`
 - `freeze_reason=...`
 
 ### In OpenCV window
@@ -137,4 +138,4 @@ libcamerify ./build/ARGUS --live-test --camera-index 0 --expected-marker-id 23
 
 ## Safety note
 Live test mode is currently for software validation and operator workflow testing.
-It uses logging-oriented interlock behavior and does not require real motion actuation to validate decision flow.
+It routes freeze and enable through the PCA9685-backed motion controller path behind `RobotInterlock`.

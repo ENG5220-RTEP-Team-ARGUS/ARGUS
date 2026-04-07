@@ -8,6 +8,7 @@ find_package(OpenCV REQUIRED)
 
 add_executable(ARGUS
     src/main.cpp
+    src/AppController.cpp
     src/GuardianStateMachine.cpp
     src/VisionProcessor.cpp
     src/CameraCapture.cpp

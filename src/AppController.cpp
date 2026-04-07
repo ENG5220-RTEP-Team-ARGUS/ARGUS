@@ -1,0 +1,545 @@
+#include "AppController.hpp"
+
+#include "CameraCapture.hpp"
+#include "GuardianStateMachine.hpp"
+#include "RobotInterlock.hpp"
+#include "VisionProcessor.hpp"
+
+#include <chrono>
+#include <cstdint>
+#include <iomanip>
+#include <iostream>
+#include <memory>
+#include <sstream>
+#include <string>
+#include <thread>
+
+namespace {
+
+constexpr const char* kLiveWindowName = "ARGUS Live Test";
+constexpr const char* kDefaultI2cDevicePath = "/dev/i2c-1";
+constexpr std::uint8_t kDefaultPca9685Address = 0x40;
+constexpr float kDefaultPwmFrequencyHz = 50.0f;
+constexpr int kLiveFreezeBadFrameThreshold = 30;
+constexpr int kLiveRecoverGoodFrameThreshold = 3;
+
+class MotionControllerHardwareAdapter final : public RobotHardware {
+public:
+    explicit MotionControllerHardwareAdapter(MotionController& motion_controller) noexcept
+        : motion_controller_(motion_controller) {}
+
+    bool freezeMotion() noexcept override {
+        motion_controller_.freeze();
+        if (motion_controller_.outputState() == MotionOutputState::FAULT) {
+            std::cerr << "[MOTION] freezeMotion() failed: "
+                      << motion_controller_.lastErrorString() << std::endl;
+            return false;
+        }
+        return true;
+    }
+
+    bool enableMotion() noexcept override {
+        if (!motion_controller_.enable()) {
+            std::cerr << "[MOTION] enableMotion() failed: "
+                      << motion_controller_.lastErrorString() << std::endl;
+            return false;
+        }
+        return true;
+    }
+
+private:
+    MotionController& motion_controller_;
+};
+
+double computeFocusScore(const cv::Mat& image) {
+    if (image.empty()) {
+        return 0.0;
+    }
+
+    cv::Mat gray;
+    if (image.channels() == 1) {
+        gray = image;
+    } else {
+        cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
+    }
+
+    cv::Mat laplacian;
+    cv::Laplacian(gray, laplacian, CV_64F);
+    cv::Scalar mean;
+    cv::Scalar stddev;
+    cv::meanStdDev(laplacian, mean, stddev);
+    return stddev[0] * stddev[0];
+}
+
+const char* focusQualityLabel(double focus_score) {
+    if (focus_score < 60.0) {
+        return "BLURRY";
+    }
+    if (focus_score < 180.0) {
+        return "SOFT";
+    }
+    return "SHARP";
+}
+
+std::string formatFocusScore(double focus_score) {
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(1) << focus_score;
+    return oss.str();
+}
+
+const char* safetyStateToString(SafetyState state) {
+    switch (state) {
+        case SafetyState::SAFE:
+            return "SAFE";
+        case SafetyState::TOOL_NOT_DETECTED:
+            return "TOOL_NOT_DETECTED";
+        case SafetyState::OUTSIDE_ALLOWED_ZONE:
+            return "OUTSIDE_ALLOWED_ZONE";
+        case SafetyState::EXCESSIVE_SPEED:
+            return "EXCESSIVE_SPEED";
+        case SafetyState::INVALID_ORIENTATION:
+            return "INVALID_ORIENTATION";
+        default:
+            return "UNKNOWN";
+    }
+}
+
+FreezeReason mapSafetyToFreezeReason(SafetyState state) {
+    switch (state) {
+        case SafetyState::TOOL_NOT_DETECTED:
+            return FreezeReason::MARKER_LOST;
+        case SafetyState::OUTSIDE_ALLOWED_ZONE:
+            return FreezeReason::MARKER_OUT_OF_ROI;
+        case SafetyState::EXCESSIVE_SPEED:
+        case SafetyState::INVALID_ORIENTATION:
+            return FreezeReason::POSITION_ERROR;
+        case SafetyState::SAFE:
+        default:
+            return FreezeReason::UNKNOWN_FAULT;
+    }
+}
+
+const char* freezeReasonToString(FreezeReason reason) {
+    switch (reason) {
+        case FreezeReason::NONE:
+            return "NONE";
+        case FreezeReason::MARKER_LOST:
+            return "MARKER_LOST";
+        case FreezeReason::MARKER_OUT_OF_ROI:
+            return "MARKER_OUT_OF_ROI";
+        case FreezeReason::VISION_TIMEOUT:
+            return "VISION_TIMEOUT";
+        case FreezeReason::POSITION_ERROR:
+            return "POSITION_ERROR";
+        case FreezeReason::WATCHDOG_TIMEOUT:
+            return "WATCHDOG_TIMEOUT";
+        case FreezeReason::UNKNOWN_FAULT:
+        default:
+            return "UNKNOWN_FAULT";
+    }
+}
+
+const char* interlockStateToString(InterlockState state) {
+    switch (state) {
+        case InterlockState::SAFE:
+            return "SAFE";
+        case InterlockState::FROZEN:
+            return "FROZEN";
+        case InterlockState::FAULT:
+            return "FAULT";
+        default:
+            return "UNKNOWN";
+    }
+}
+
+const char* motionControllerStateToString(MotionOutputState state) {
+    switch (state) {
+        case MotionOutputState::UNINITIALISED:
+            return "UNINITIALISED";
+        case MotionOutputState::DISABLED:
+            return "DISABLED";
+        case MotionOutputState::ENABLED:
+            return "ENABLED";
+        case MotionOutputState::FAULT:
+            return "FAULT";
+        default:
+            return "UNKNOWN";
+    }
+}
+
+}  // namespace
+
+AppController::AppController() noexcept = default;
+
+AppController::~AppController() noexcept = default;
+
+int AppController::runGuardianScenarioDemo() {
+    GuardianStateMachine guardian(2, 3);
+    guardian.setOnFreezeCallback([]() {
+        std::cout << ">>> ROBOTIC ARM: Emergency stop activated! <<<" << std::endl;
+    });
+    guardian.setOnClearFreezeCallback([]() {
+        std::cout << ">>> ROBOTIC ARM: Motion resumed, system operational <<<"
+                  << std::endl;
+    });
+    guardian.setOnStateChangeCallback([](GuardianState, GuardianState) {
+        std::cout << ">>> STATE CHANGE NOTIFICATION: System transitioned <<<"
+                  << std::endl;
+    });
+
+    std::cout << "\n========== GUARDIAN STATE MACHINE TEST ==========\n"
+              << std::endl;
+
+    std::cout << "Scenario 1: Normal Operation" << std::endl;
+    guardian.processFrame(FrameStatus::FRAME_GOOD);
+    guardian.processFrame(FrameStatus::FRAME_GOOD);
+    guardian.printStatus();
+
+    std::cout << "Scenario 2: Single Bad Frame" << std::endl;
+    guardian.processFrame(FrameStatus::FRAME_BAD);
+    guardian.processFrame(FrameStatus::FRAME_GOOD);
+    guardian.printStatus();
+
+    std::cout << "Scenario 3: freezeCount Consecutive Bad Frames (Freeze)"
+              << std::endl;
+    guardian.processFrame(FrameStatus::FRAME_BAD);
+    guardian.processFrame(FrameStatus::FRAME_BAD);
+    guardian.printStatus();
+
+    std::cout << "Scenario 4: Frames During Frozen State" << std::endl;
+    guardian.processFrame(FrameStatus::FRAME_GOOD);
+    guardian.processFrame(FrameStatus::FRAME_GOOD);
+    guardian.printStatus();
+
+    std::cout << "Scenario 5: Operator Acknowledgment/Reset" << std::endl;
+    guardian.operatorAcknowledge();
+    guardian.printStatus();
+
+    std::cout << "Scenario 6: Bad Frame During Reset" << std::endl;
+    guardian.processFrame(FrameStatus::FRAME_GOOD);
+    guardian.processFrame(FrameStatus::FRAME_BAD);
+    guardian.printStatus();
+
+    std::cout << "Scenario 7: recoverCount Consecutive Good Frames (Clear Freeze)"
+              << std::endl;
+    guardian.processFrame(FrameStatus::FRAME_GOOD);
+    guardian.processFrame(FrameStatus::FRAME_GOOD);
+    guardian.processFrame(FrameStatus::FRAME_GOOD);
+    guardian.printStatus();
+
+    std::cout << "========== TEST COMPLETE ==========\n" << std::endl;
+    return 0;
+}
+
+int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
+    std::cout
+        << "[LIVE_TEST] Starting live marker safety test mode\n"
+        << "[LIVE_TEST] Camera index: " << options.camera_index << "\n"
+        << "[LIVE_TEST] Expected marker ID: " << options.expected_marker_id << "\n"
+        << "[LIVE_TEST] Auto operator ack: "
+        << (options.auto_ack ? "ON" : "OFF") << "\n"
+        << "[LIVE_TEST] Controls: a=arm, d=disarm, q=quit\n"
+        << "[LIVE_TEST] Starting in DISARMED setup mode\n"
+        << "[LIVE_TEST] Guardian thresholds: freeze after "
+        << kLiveFreezeBadFrameThreshold
+        << " consecutive bad frames, recover after "
+        << kLiveRecoverGoodFrameThreshold
+        << " consecutive good frames.\n"
+        << "[LIVE_TEST] Focus debug enabled: FOCUS_SCORE (Laplacian variance), "
+           "higher usually means sharper marker edges.\n";
+
+    MotionChannelMap channel_map{};
+    channel_map.base = 0;
+    channel_map.lower = 1;
+    channel_map.upper = 2;
+    channel_map.gripper = 3;
+
+    if (!motion_controller_.initialise(kDefaultI2cDevicePath,
+                                       kDefaultPca9685Address,
+                                       kDefaultPwmFrequencyHz,
+                                       channel_map)) {
+        std::cerr << "[LIVE_TEST] Motion controller initialization failed: "
+                  << motion_controller_.lastErrorString() << std::endl;
+        return 1;
+    }
+
+    MotionControllerHardwareAdapter hardware(motion_controller_);
+    VisionConfig vision_config;
+    vision_config.expectedMarkerId = options.expected_marker_id;
+    VisionProcessor vision_processor(vision_config);
+
+    std::unique_ptr<GuardianStateMachine> guardian;
+    std::unique_ptr<RobotInterlock> interlock;
+    bool guardian_armed = false;
+    bool motion_faulted = false;
+    FreezeReason pending_reason = FreezeReason::UNKNOWN_FAULT;
+
+    auto resetEnforcementState = [&]() {
+        pending_reason = FreezeReason::UNKNOWN_FAULT;
+        guardian = std::make_unique<GuardianStateMachine>(
+            kLiveFreezeBadFrameThreshold,
+            kLiveRecoverGoodFrameThreshold);
+        interlock = std::make_unique<RobotInterlock>(hardware);
+
+        guardian->setOnFreezeCallback([&]() {
+            interlock->onControlEvent(ControlEvent::FREEZE_NOW, pending_reason);
+        });
+
+        guardian->setOnClearFreezeCallback([&]() {
+            interlock->onControlEvent(ControlEvent::ALLOW_MOTION);
+        });
+
+        guardian->setOnStateChangeCallback([&](GuardianState from, GuardianState to) {
+            std::cout << "[GUARDIAN] " << guardian->stateToString(from) << " -> "
+                      << guardian->stateToString(to) << std::endl;
+        });
+    };
+
+    resetEnforcementState();
+
+    CameraCapture camera_capture(options.camera_index);
+    cv::namedWindow(kLiveWindowName, cv::WINDOW_AUTOSIZE);
+
+    FrameEvent frame_event;
+    std::uint64_t frame_index = 0;
+    bool processed_any_frame = false;
+    int consecutive_capture_failures = 0;
+
+    while (true) {
+        if (interlock->state() == InterlockState::FAULT) {
+            motion_faulted = true;
+            std::cerr << "[LIVE_TEST] Interlock entered FAULT state (motion controller: "
+                      << motion_controller_.lastErrorString() << ")" << std::endl;
+            break;
+        }
+
+        if (!camera_capture.waitForNextFrame(frame_event)) {
+            ++consecutive_capture_failures;
+            std::cerr << "[LIVE_TEST] Frame capture failed ("
+                      << consecutive_capture_failures
+                      << "/30). Retrying..." << std::endl;
+
+            if (consecutive_capture_failures >= 30) {
+                break;
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            continue;
+        }
+
+        consecutive_capture_failures = 0;
+        processed_any_frame = true;
+
+        const SafetyResult result =
+            vision_processor.process(frame_event.image_data,
+                                     std::chrono::steady_clock::now());
+        const double focus_score = computeFocusScore(frame_event.image_data);
+        const char* focus_quality = focusQualityLabel(focus_score);
+
+        const bool frame_is_safe = (result.state == SafetyState::SAFE);
+        if (!frame_is_safe) {
+            pending_reason = mapSafetyToFreezeReason(result.state);
+        }
+
+        std::string guardian_state_text = "DISARMED_SETUP";
+        std::string interlock_state_text = "DISARMED";
+        std::string freeze_reason_text = "N/A";
+
+        if (guardian_armed) {
+            guardian->processFrame(frame_is_safe ? FrameStatus::FRAME_GOOD
+                                                 : FrameStatus::FRAME_BAD);
+
+            if (options.auto_ack &&
+                guardian->getState() == GuardianState::FROZEN_UNSAFE) {
+                guardian->operatorAcknowledge();
+                interlock->operatorAcknowledge();
+                std::cout << "[LIVE_TEST] Operator acknowledge sent automatically"
+                          << std::endl;
+            }
+
+            interlock->guardianHeartbeat(static_cast<std::uint32_t>(frame_index));
+
+            guardian_state_text = guardian->getCurrentStateString();
+            interlock_state_text = interlockStateToString(interlock->state());
+            freeze_reason_text = freezeReasonToString(interlock->freezeReason());
+        }
+
+        std::cout << "[LIVE_TEST] frame=" << frame_index
+                  << " armed=" << (guardian_armed ? "YES" : "NO")
+                  << " can_arm=" << (frame_is_safe ? "YES" : "NO")
+                  << " vision=" << safetyStateToString(result.state)
+                  << " focus_score=" << formatFocusScore(focus_score)
+                  << " focus=" << focus_quality
+                  << " guardian=" << guardian_state_text
+                  << " interlock=" << interlock_state_text
+                  << " motion_ctrl="
+                  << motionControllerStateToString(motion_controller_.outputState())
+                  << " freeze_reason=" << freeze_reason_text
+                  << " processing_us=" << result.processing_time.count()
+                  << std::endl;
+
+        if (interlock->state() == InterlockState::FAULT) {
+            motion_faulted = true;
+            std::cerr << "[LIVE_TEST] Motion control fault detected: "
+                      << motion_controller_.lastErrorString() << std::endl;
+            break;
+        }
+
+        cv::Mat display_frame = frame_event.image_data.clone();
+        const bool decision_is_safe = guardian_armed
+                                          ? ((result.state == SafetyState::SAFE) &&
+                                             (guardian->getState() ==
+                                              GuardianState::SAFE_MONITORING) &&
+                                             interlock->motionAllowed())
+                                          : (result.state == SafetyState::SAFE);
+        const cv::Scalar decision_color =
+            decision_is_safe ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 0, 255);
+
+        cv::putText(display_frame,
+                    std::string("VISION: ") + safetyStateToString(result.state),
+                    cv::Point(16, 30),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    cv::Scalar(255, 255, 255),
+                    2);
+
+        cv::putText(display_frame,
+                    std::string("GUARDIAN: ") + guardian_state_text,
+                    cv::Point(16, 60),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    cv::Scalar(255, 255, 255),
+                    2);
+
+        cv::putText(display_frame,
+                    std::string("INTERLOCK: ") + interlock_state_text,
+                    cv::Point(16, 90),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    cv::Scalar(255, 255, 255),
+                    2);
+
+        cv::putText(display_frame,
+                    std::string("CONTROL: ") +
+                        (guardian_armed ? "ARMED (d=disarm)" : "DISARMED (a=arm)") +
+                        " | CAN_ARM: " + (frame_is_safe ? "YES" : "NO"),
+                    cv::Point(16, 120),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    cv::Scalar(255, 255, 0),
+                    2);
+
+        cv::putText(display_frame,
+                    guardian_armed ? (decision_is_safe ? "SAFE" : "UNSAFE")
+                                   : (frame_is_safe ? "OBSERVED_SAFE"
+                                                    : "OBSERVED_UNSAFE"),
+                    cv::Point(16, 155),
+                    cv::FONT_HERSHEY_DUPLEX,
+                    1.0,
+                    decision_color,
+                    2);
+
+        cv::putText(display_frame,
+                    "Expected marker ID: " + std::to_string(options.expected_marker_id),
+                    cv::Point(16, 185),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    cv::Scalar(180, 180, 180),
+                    1);
+
+        const cv::Scalar focus_color =
+            (focus_score < 60.0) ? cv::Scalar(0, 0, 255)
+                                 : ((focus_score < 180.0) ? cv::Scalar(0, 255, 255)
+                                                           : cv::Scalar(0, 255, 0));
+        cv::putText(display_frame,
+                    "FOCUS_SCORE: " + formatFocusScore(focus_score) + " (" +
+                        std::string(focus_quality) + ")",
+                    cv::Point(16, 215),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    focus_color,
+                    2);
+
+        cv::putText(display_frame,
+                    "Focus hint: adjust lens/ring until score rises and marker is stable",
+                    cv::Point(16, 240),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    cv::Scalar(200, 200, 200),
+                    1);
+
+        cv::imshow(kLiveWindowName, display_frame);
+        const int key = cv::waitKey(1);
+        if (key == 'q' || key == 'Q') {
+            std::cout << "[LIVE_TEST] Exit requested from display window (q)." << std::endl;
+            break;
+        }
+
+        if (key == 'a' || key == 'A') {
+            if (guardian_armed) {
+                std::cout << "[LIVE_TEST] ARM request ignored: guardian already armed."
+                          << std::endl;
+            } else if (!frame_is_safe) {
+                std::cout << "[LIVE_TEST] ARM request rejected: current observed condition is "
+                             "unsafe (vision="
+                          << safetyStateToString(result.state) << ")." << std::endl;
+            } else {
+                interlock->onControlEvent(
+                    ControlEvent::FREEZE_NOW,
+                    FreezeReason::UNKNOWN_FAULT);
+                if (interlock->state() == InterlockState::FAULT) {
+                    motion_faulted = true;
+                    std::cerr << "[LIVE_TEST] Unable to freeze motion before arming: "
+                              << motion_controller_.lastErrorString() << std::endl;
+                    break;
+                }
+
+                resetEnforcementState();
+                guardian_armed = true;
+                std::cout << "[LIVE_TEST] ARM accepted: guardian enforcement is now ACTIVE."
+                          << std::endl;
+            }
+        }
+
+        if (key == 'd' || key == 'D') {
+            if (!guardian_armed) {
+                std::cout << "[LIVE_TEST] DISARM request ignored: guardian already disarmed."
+                          << std::endl;
+            } else {
+                interlock->onControlEvent(
+                    ControlEvent::FREEZE_NOW,
+                    FreezeReason::UNKNOWN_FAULT);
+                if (interlock->state() == InterlockState::FAULT) {
+                    motion_faulted = true;
+                    std::cerr << "[LIVE_TEST] Unable to freeze motion before disarming: "
+                              << motion_controller_.lastErrorString() << std::endl;
+                    break;
+                }
+
+                guardian_armed = false;
+                resetEnforcementState();
+                std::cout << "[LIVE_TEST] DISARM accepted: guardian enforcement is now INACTIVE "
+                             "(setup/observation mode)."
+                          << std::endl;
+            }
+        }
+
+        ++frame_index;
+    }
+
+    cv::destroyWindow(kLiveWindowName);
+    motion_controller_.shutdown();
+
+    if (!processed_any_frame) {
+        std::cerr << "[LIVE_TEST] No frames processed. Check camera availability."
+                  << std::endl;
+        return 1;
+    }
+
+    if (motion_faulted) {
+        return 1;
+    }
+
+    std::cerr << "[LIVE_TEST] Frame stream ended." << std::endl;
+    return 0;
+}

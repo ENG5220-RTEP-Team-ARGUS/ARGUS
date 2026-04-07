@@ -10,7 +10,8 @@ enum class ControlEvent {
 
 enum class InterlockState {
     SAFE,
-    FROZEN
+    FROZEN,
+    FAULT
 };
 
 enum class FreezeReason {
@@ -28,10 +29,10 @@ public:
     virtual ~RobotHardware() = default;
 
     // Must immediately stop robot arm and cutter.
-    virtual void freezeMotion() noexcept = 0;
+    virtual bool freezeMotion() noexcept = 0;
 
     // Re-enable motion only after ack and safe conditions.
-    virtual void enableMotion() noexcept = 0;
+    virtual bool enableMotion() noexcept = 0;
 };
 
 class RobotInterlock {
@@ -54,6 +55,7 @@ public:
 private:
     void freeze(FreezeReason reason) noexcept;
     void attemptResume() noexcept;
+    void enterFault(FreezeReason reason) noexcept;
 
     RobotHardware& hardware_;
     std::atomic<InterlockState> state_;
@@ -64,8 +66,8 @@ private:
 
 class PhysicalRobotHardware final : public RobotHardware {
 public:
-    void freezeMotion() noexcept override;
-    void enableMotion() noexcept override;
+    bool freezeMotion() noexcept override;
+    bool enableMotion() noexcept override;
 
 private:
     static void GPIO_WritePin(int pin, bool value) noexcept;

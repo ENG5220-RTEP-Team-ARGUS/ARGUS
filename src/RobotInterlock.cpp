@@ -52,13 +52,20 @@ InterlockState RobotInterlock::state() const noexcept {
 
 void RobotInterlock::freeze(FreezeReason reason) noexcept {
     InterlockState expected = InterlockState::SAFE;
-    if (state_.compare_exchange_strong(
+    if (!state_.compare_exchange_strong(
             expected,
             InterlockState::FROZEN,
             std::memory_order_acq_rel)) {
-        freeze_reason_.store(reason, std::memory_order_relaxed);
-        operator_ack_.store(false, std::memory_order_relaxed);
-        hardware_.freezeMotion();
+        return;
+    }
+
+    freeze_reason_.store(reason, std::memory_order_relaxed);
+    operator_ack_.store(false, std::memory_order_relaxed);
+
+    if (!hardware_.freezeMotion()) {
+        std::cerr << "[INTERLOCK] Hardware freeze failed; entering FAULT state"
+                  << std::endl;
+        enterFault(FreezeReason::UNKNOWN_FAULT);
     }
 }
 
@@ -71,19 +78,35 @@ void RobotInterlock::attemptResume() noexcept {
         return;
     }
 
-    hardware_.enableMotion();
+    if (!hardware_.enableMotion()) {
+        std::cerr << "[INTERLOCK] Hardware enable failed; entering FAULT state"
+                  << std::endl;
+        enterFault(FreezeReason::UNKNOWN_FAULT);
+        return;
+    }
+
     freeze_reason_.store(FreezeReason::NONE, std::memory_order_relaxed);
     state_.store(InterlockState::SAFE, std::memory_order_release);
 }
 
-void PhysicalRobotHardware::freezeMotion() noexcept {
-    GPIO_WritePin(ARM_ENABLE_PIN, false);
-    GPIO_WritePin(CUTTER_ENABLE_PIN, false);
+void RobotInterlock::enterFault(FreezeReason reason) noexcept {
+    freeze_reason_.store(reason, std::memory_order_relaxed);
+    operator_ack_.store(false, std::memory_order_relaxed);
+    state_.store(InterlockState::FAULT, std::memory_order_release);
 }
 
-void PhysicalRobotHardware::enableMotion() noexcept {
+bool PhysicalRobotHardware::freezeMotion() noexcept {
+    // Legacy placeholder path; the live application uses the PCA9685 adapter.
+    GPIO_WritePin(ARM_ENABLE_PIN, false);
+    GPIO_WritePin(CUTTER_ENABLE_PIN, false);
+    return false;
+}
+
+bool PhysicalRobotHardware::enableMotion() noexcept {
+    // Legacy placeholder path; the live application uses the PCA9685 adapter.
     GPIO_WritePin(ARM_ENABLE_PIN, true);
     GPIO_WritePin(CUTTER_ENABLE_PIN, true);
+    return false;
 }
 
 void PhysicalRobotHardware::GPIO_WritePin(int pin, bool value) noexcept {
