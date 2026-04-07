@@ -1,5 +1,7 @@
 #include "RobotInterlock.hpp"
 
+#include <iostream>
+
 RobotInterlock::RobotInterlock(RobotHardware& hardware) noexcept
     : hardware_(hardware),
       state_(InterlockState::SAFE),
