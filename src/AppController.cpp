@@ -50,18 +50,18 @@ constexpr int kSmokeNegativeStep = -90;
 constexpr int kDemoFreezeBadFrameThreshold = 1;
 constexpr int kDemoRecoverGoodFrameThreshold = 3;
 constexpr std::chrono::milliseconds kDemoStepDwell{1000};
-constexpr int kDemoBaseMinOffset = -90;
-constexpr int kDemoBaseMaxOffset = 90;
-constexpr int kDemoLowerMinOffset = -90;
-constexpr int kDemoLowerMaxOffset = 90;
-constexpr int kDemoUpperMinOffset = -90;
-constexpr int kDemoUpperMaxOffset = 90;
-constexpr int kDemoGripMinOffset = -90;
-constexpr int kDemoGripMaxOffset = 90;
-constexpr int kDemoBaseStep = 90;
-constexpr int kDemoLowerStep = 90;
-constexpr int kDemoUpperStep = 90;
-constexpr int kDemoGripStep = 90;
+constexpr int kDemoBaseMinOffset = -60;
+constexpr int kDemoBaseMaxOffset = 60;
+constexpr int kDemoLowerMinOffset = -60;
+constexpr int kDemoLowerMaxOffset = 60;
+constexpr int kDemoUpperMinOffset = -60;
+constexpr int kDemoUpperMaxOffset = 60;
+constexpr int kDemoGripMinOffset = -60;
+constexpr int kDemoGripMaxOffset = 60;
+constexpr int kDemoBaseStep = 60;
+constexpr int kDemoLowerStep = 60;
+constexpr int kDemoUpperStep = 60;
+constexpr int kDemoGripStep = 60;
 
 class MotionControllerHardwareAdapter final : public RobotHardware {
 public:
@@ -245,17 +245,17 @@ struct DemoPoseStep {
 constexpr DemoPoseStep kDemoHomeStep{"HOME", kSmokeHomePose};
 
 constexpr std::array<DemoPoseStep, 12> kDemoSequence = {{
-    {"BASE +90", {kDemoBaseStep, 0, 0, 0}},
-    {"BASE -90", {-kDemoBaseStep, 0, 0, 0}},
+    {"BASE +60", {kDemoBaseStep, 0, 0, 0}},
+    {"BASE -60", {-kDemoBaseStep, 0, 0, 0}},
     {"HOME", {0, 0, 0, 0}},
-    {"LOWER +90", {0, kDemoLowerStep, 0, 0}},
-    {"LOWER -90", {0, -kDemoLowerStep, 0, 0}},
+    {"LOWER +60", {0, kDemoLowerStep, 0, 0}},
+    {"LOWER -60", {0, -kDemoLowerStep, 0, 0}},
     {"HOME", {0, 0, 0, 0}},
-    {"UPPER +90", {0, 0, kDemoUpperStep, 0}},
-    {"UPPER -90", {0, 0, -kDemoUpperStep, 0}},
+    {"UPPER +60", {0, 0, kDemoUpperStep, 0}},
+    {"UPPER -60", {0, 0, -kDemoUpperStep, 0}},
     {"HOME", {0, 0, 0, 0}},
-    {"GRIP +90", {0, 0, 0, kDemoGripStep}},
-    {"GRIP -90", {0, 0, 0, -kDemoGripStep}},
+    {"GRIP +60", {0, 0, 0, kDemoGripStep}},
+    {"GRIP -60", {0, 0, 0, -kDemoGripStep}},
     {"HOME", {0, 0, 0, 0}},
 }};
 
@@ -668,7 +668,7 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
         << "[DEMO] camera=" << options.camera_index
         << " marker=" << options.expected_marker_id << "\n"
         << "[DEMO] map base=0 lower=4 upper=8 grip=12\n"
-        << "[DEMO] sequence HOME -> BASE +/-90 -> LOWER +/-90 -> UPPER +/-90 -> GRIP +/-90\n"
+        << "[DEMO] sequence HOME -> BASE +/-60 -> LOWER +/-60 -> UPPER +/-60 -> GRIP +/-60\n"
         << "[DEMO] freeze after 1 bad frame, recover after 3 good frames\n"
         << "[DEMO] safe scene required before arm/start\n"
         << "[DEMO] physical button = continue (arm/start or resume)\n"

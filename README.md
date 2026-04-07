@@ -190,17 +190,17 @@ What it does:
 - lets the operator arm/start the demo only when the scene is safe
 - after arm, runs the dance and uses the normal safe-again + ACK recovery path on later freezes
 - then runs a repeating dance:
-  - `BASE +90`
-  - `BASE -90`
+  - `BASE +60`
+  - `BASE -60`
   - `HOME`
-  - `LOWER +90`
-  - `LOWER -90`
+  - `LOWER +60`
+  - `LOWER -60`
   - `HOME`
-  - `UPPER +90`
-  - `UPPER -90`
+  - `UPPER +60`
+  - `UPPER -60`
   - `HOME`
-  - `GRIP +90`
-  - `GRIP -90`
+  - `GRIP +60`
+  - `GRIP -60`
   - `HOME`
 
 Behavior:
