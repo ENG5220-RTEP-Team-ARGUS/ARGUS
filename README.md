@@ -67,17 +67,39 @@ Options:
 
 ### 3) Motion smoke test (hardware in the loop)
 Runs a motion-only servo sweep through the existing `AppController -> MotionController`
-path.
+path. Use one joint at a time when you are trying to isolate wiring, code, or
+mechanical binding.
 
 ```bash
-./build/ARGUS --motion-smoke-test
+./build/ARGUS --motion-smoke-test --base
+./build/ARGUS --motion-smoke-test --lower
+./build/ARGUS --motion-smoke-test --upper
+./build/ARGUS --motion-smoke-test --grip
 ```
+
+Convenience wrappers are also provided:
+- `scripts/smoke_base.sh`
+- `scripts/smoke_lower.sh`
+- `scripts/smoke_upper.sh`
+- `scripts/smoke_grip.sh`
+
+If you omit the joint flag, `--motion-smoke-test` runs all four joints in sequence.
+
+The on-screen output is intentionally terse:
+- `all -> 0`
+- `base -> -90`
+- `wait 3s`
+
+Each run does the same simple pattern on the selected joint only:
+1. Move all joints to home
+2. Move the selected joint `0 -> -90 -> +90 -> 0`
+3. Hold each step for about 3 seconds
 
 This mode does not use the camera pipeline, guardian freeze path, or button input.
 It is meant to confirm:
 - PCA9685 I2C output is working
 - the MeArm channel mapping is correct
-- each servo can move cleanly on its own
+- the selected servo can move cleanly on its own
 - the arm returns to home after each sweep
 
 The smoke test uses zero-centered logical joint offsets and initial sweep windows:
@@ -92,24 +114,17 @@ Validated hardware mapping:
 - upper -> channel `2` -> MeArm `LEFT`
 - grip -> channel `3` -> MeArm `CLAW`
 
-Sequence:
-1. Move to home pose
-2. For `base`, move `0 -> -90 -> +90 -> 0`
-3. For `lower`, move `0 -> -90 -> +90 -> 0`
-4. For `upper`, move `0 -> -90 -> +90 -> 0`
-5. For `grip`, move `0 -> -90 -> +90 -> 0`
-
-Every step is held for about 3 seconds.
-
 What you should see:
 - `base` yaw left/right while `lower`, `upper`, and `grip` stay at home
 - `lower` raises/lowers while the other three stay at home
 - `upper` bends/extends while the other three stay at home
 - `grip` opens/closes while the other three stay at home
-- each joint should return to the neutral `0` position before the next joint starts
+- each selected joint should return to the neutral `0` position before the test ends
 
-If a joint moves the wrong way, binds, or hits a hard stop, stop the test and
-shrink the step constants in `src/AppController.cpp` before trying again.
+If a joint jumps in place, binds, or hits a hard stop, stop the test and inspect
+that joint first: linkage tightness, servo orientation, signal wire, and 6V power
+sharing. If all four scripts show the same symptom, look at the common path
+first: PCA9685 power, I2C, code, or ground reference.
 
 Every command is clamped in software before it reaches the motion controller. If the
 sequence needs to be tightened further for a mechanically sensitive build, reduce the

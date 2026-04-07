@@ -25,10 +25,7 @@ constexpr std::uint8_t kDefaultPca9685Address = 0x40;
 constexpr float kDefaultPwmFrequencyHz = 50.0f;
 constexpr int kLiveFreezeBadFrameThreshold = 30;
 constexpr int kLiveRecoverGoodFrameThreshold = 3;
-constexpr int kSmokeFreezeBadFrameThreshold = 1;
-constexpr int kSmokeRecoverGoodFrameThreshold = 1;
 constexpr std::chrono::milliseconds kSmokeStepDwell{3000};
-constexpr std::chrono::milliseconds kSmokeTransitionPause{200};
 constexpr std::uint16_t kSmokeNeutralPulseTicks = 300;
 constexpr int kSmokeBaseMinOffset = -90;
 constexpr int kSmokeBaseMaxOffset = 90;
@@ -192,36 +189,78 @@ struct SmokeJointOffsets {
     int grip{0};
 };
 
-struct SmokePose {
-    const char* name;
-    SmokeJointOffsets offsets;
-    bool stage_while_frozen;
-};
-
 struct SmokeJointSpec {
     const char* logical_name;
     const char* mearm_name;
+    const char* visual_check;
     std::uint8_t channel;
     int min_offset;
     int max_offset;
 };
 
+struct SmokeJointRunPlan {
+    std::array<std::size_t, MotionController::kServoCount> indices{};
+    std::size_t count{0};
+};
+
 constexpr std::array<SmokeJointSpec, MotionController::kServoCount> kSmokeJointSpecs = {{
-    {"base", "MeArm BASE", 0, kSmokeBaseMinOffset, kSmokeBaseMaxOffset},
-    {"lower", "MeArm RIGHT", 1, kSmokeLowerMinOffset, kSmokeLowerMaxOffset},
-    {"upper", "MeArm LEFT", 2, kSmokeUpperMinOffset, kSmokeUpperMaxOffset},
-    {"grip", "MeArm CLAW", 3, kSmokeGripMinOffset, kSmokeGripMaxOffset},
+    {"base", "MeArm BASE", "yaw left/right", 0, kSmokeBaseMinOffset, kSmokeBaseMaxOffset},
+    {"lower", "MeArm RIGHT", "raise/lower", 1, kSmokeLowerMinOffset, kSmokeLowerMaxOffset},
+    {"upper", "MeArm LEFT", "bend/extend", 2, kSmokeUpperMinOffset, kSmokeUpperMaxOffset},
+    {"grip", "MeArm CLAW", "open/close", 3, kSmokeGripMinOffset, kSmokeGripMaxOffset},
 }};
 
 constexpr SmokeJointOffsets kSmokeHomePose{0, 0, 0, 0};
-constexpr SmokeJointOffsets kSmokeBasePositivePose{kSmokePositiveStep, 0, 0, 0};
-constexpr SmokeJointOffsets kSmokeBaseNegativePose{kSmokeNegativeStep, 0, 0, 0};
-constexpr SmokeJointOffsets kSmokeLowerPositivePose{0, kSmokePositiveStep, 0, 0};
-constexpr SmokeJointOffsets kSmokeLowerNegativePose{0, kSmokeNegativeStep, 0, 0};
-constexpr SmokeJointOffsets kSmokeUpperPositivePose{0, 0, kSmokePositiveStep, 0};
-constexpr SmokeJointOffsets kSmokeUpperNegativePose{0, 0, kSmokeNegativeStep, 0};
-constexpr SmokeJointOffsets kSmokeGripPositivePose{0, 0, 0, kSmokePositiveStep};
-constexpr SmokeJointOffsets kSmokeGripNegativePose{0, 0, 0, kSmokeNegativeStep};
+
+const char* smokeJointSelectionToString(AppController::SmokeJoint joint) {
+    switch (joint) {
+        case AppController::SmokeJoint::All:
+            return "all";
+        case AppController::SmokeJoint::Base:
+            return "base";
+        case AppController::SmokeJoint::Lower:
+            return "lower";
+        case AppController::SmokeJoint::Upper:
+            return "upper";
+        case AppController::SmokeJoint::Grip:
+            return "grip";
+        default:
+            return "unknown";
+    }
+}
+
+SmokeJointRunPlan makeSmokeJointRunPlan(AppController::SmokeJoint joint) {
+    SmokeJointRunPlan plan{};
+
+    switch (joint) {
+        case AppController::SmokeJoint::Base:
+            plan.indices[0] = 0;
+            plan.count = 1;
+            break;
+        case AppController::SmokeJoint::Lower:
+            plan.indices[0] = 1;
+            plan.count = 1;
+            break;
+        case AppController::SmokeJoint::Upper:
+            plan.indices[0] = 2;
+            plan.count = 1;
+            break;
+        case AppController::SmokeJoint::Grip:
+            plan.indices[0] = 3;
+            plan.count = 1;
+            break;
+        case AppController::SmokeJoint::All:
+        default:
+            plan.indices[0] = 0;
+            plan.indices[1] = 1;
+            plan.indices[2] = 2;
+            plan.indices[3] = 3;
+            plan.count = 4;
+            break;
+    }
+
+    return plan;
+}
 
 int clampOffsetValue(int value, int min_value, int max_value, bool& clamped) {
     const int bounded = std::clamp(value, min_value, max_value);
@@ -357,188 +396,11 @@ int AppController::runGuardianScenarioDemo() {
     return 0;
 }
 
-int AppController::runMotionSmokeTest() {
-    {
-        std::cout
-            << "[SMOKE_TEST] Starting motion-only servo smoke test\n"
-            << "[SMOKE_TEST] Purpose: verify PCA9685 output and servo mapping only\n"
-            << "[SMOKE_TEST] No guardian freeze, no recovery cycle, no camera input\n"
-            << "[SMOKE_TEST] Logical home for all joints: base=0 lower=0 upper=0 grip=0\n"
-            << "[SMOKE_TEST] Each step is held for 3 seconds\n"
-            << "[SMOKE_TEST] Per-joint sweep: 0 -> -90 -> +90 -> 0\n";
-
-        for (const SmokeJointSpec& spec : kSmokeJointSpecs) {
-            std::cout << "[SMOKE_TEST]   " << spec.logical_name
-                      << " -> channel " << static_cast<int>(spec.channel)
-                      << " -> " << spec.mearm_name
-                      << " clamp window [" << spec.min_offset << ", "
-                      << spec.max_offset << "]"
-                      << std::endl;
-        }
-
-        MotionChannelMap channel_map{};
-        channel_map.base = 0;
-        channel_map.lower = 1;
-        channel_map.upper = 2;
-        channel_map.gripper = 3;
-
-        if (!motion_controller_.initialise(kDefaultI2cDevicePath,
-                                           kDefaultPca9685Address,
-                                           kDefaultPwmFrequencyHz,
-                                           channel_map)) {
-            std::cerr << "[SMOKE_TEST] Motion controller initialization failed: "
-                      << motion_controller_.lastErrorString() << std::endl;
-            return 1;
-        }
-
-        auto fail = [&](const std::string& message) {
-            std::cerr << "[SMOKE_TEST] " << message << std::endl;
-            motion_controller_.shutdown();
-            return 1;
-        };
-
-        auto logStatus = [&](const std::string& phase) {
-            std::cout << "[SMOKE_TEST] phase=" << phase
-                      << " motion_ctrl="
-                      << motionControllerStateToString(motion_controller_.outputState())
-                      << " enabled=" << (motion_controller_.isEnabled() ? "YES" : "NO")
-                      << " frozen=" << (motion_controller_.isFrozen() ? "YES" : "NO")
-                      << std::endl;
-        };
-
-        auto makeJointOffsets = [](int joint_index, int joint_offset) {
-            SmokeJointOffsets offsets{};
-            switch (joint_index) {
-                case 0:
-                    offsets.base = joint_offset;
-                    break;
-                case 1:
-                    offsets.lower = joint_offset;
-                    break;
-                case 2:
-                    offsets.upper = joint_offset;
-                    break;
-                case 3:
-                    offsets.grip = joint_offset;
-                    break;
-                default:
-                    break;
-            }
-            return offsets;
-        };
-
-        auto stagePose = [&](const std::string& label,
-                             const SmokeJointOffsets& requested) {
-            bool clamped = false;
-            const SmokeJointOffsets bounded = clampSmokeOffsets(requested, clamped);
-            const MeArmJointTargets targets = makeSmokeTargets(bounded, clamped);
-
-            if (clamped) {
-                std::cout << "[SMOKE_TEST] " << label << " requested "
-                          << formatOffsets(requested) << " clamped to "
-                          << formatOffsets(bounded) << std::endl;
-            }
-
-            if (!motion_controller_.setTargets(targets)) {
-                return fail(std::string("failed to stage pose ") + label + ": " +
-                            motion_controller_.lastErrorString());
-            }
-
-            std::cout << "[SMOKE_TEST] " << label << " -> offsets "
-                      << formatOffsets(bounded) << " targets "
-                      << formatTargets(targets) << std::endl;
-            logStatus(label);
-            std::this_thread::sleep_for(kSmokeStepDwell);
-            return 0;
-        };
-
-        bool home_clamped = false;
-        const MeArmJointTargets home_targets =
-            makeSmokeTargets(kSmokeHomePose, home_clamped);
-
-        if (!motion_controller_.setTargets(home_targets)) {
-            return fail(std::string("failed to stage home pose: ") +
-                        motion_controller_.lastErrorString());
-        }
-
-        if (!motion_controller_.enable()) {
-            return fail(std::string("failed to enable motion: ") +
-                        motion_controller_.lastErrorString());
-        }
-
-        logStatus("home");
-        std::this_thread::sleep_for(kSmokeStepDwell);
-
-        auto runJointSweep = [&](std::size_t index) {
-            const SmokeJointSpec& spec = kSmokeJointSpecs[index];
-            std::cout << "[SMOKE_TEST] joint=" << spec.logical_name
-                      << " servo=" << spec.mearm_name
-                      << " sweep=0->-90->+90->0" << std::endl;
-
-            const std::string home_label = std::string(spec.logical_name) + " home";
-            const std::string neg_label = std::string(spec.logical_name) + " -90";
-            const std::string pos_label = std::string(spec.logical_name) + " +90";
-
-            if (stagePose(home_label, makeJointOffsets(static_cast<int>(index), 0)) != 0) {
-                return 1;
-            }
-            if (stagePose(neg_label,
-                          makeJointOffsets(static_cast<int>(index), kSmokeNegativeStep)) != 0) {
-                return 1;
-            }
-            if (stagePose(pos_label,
-                          makeJointOffsets(static_cast<int>(index), kSmokePositiveStep)) != 0) {
-                return 1;
-            }
-            if (stagePose(home_label, makeJointOffsets(static_cast<int>(index), 0)) != 0) {
-                return 1;
-            }
-
-            return 0;
-        };
-
-        for (std::size_t index = 0; index < kSmokeJointSpecs.size(); ++index) {
-            if (runJointSweep(index) != 0) {
-                motion_controller_.shutdown();
-                return 1;
-            }
-        }
-
-        motion_controller_.shutdown();
-        std::cout << "[SMOKE_TEST] Motion-only smoke test complete." << std::endl;
-        return 0;
-    }
-
+int AppController::runMotionSmokeTest(const MotionSmokeTestOptions& options) {
     std::cout
-        << "[SMOKE_TEST] Starting motion smoke test mode\n"
-        << "[SMOKE_TEST] Hardware path: AppController -> GuardianStateMachine -> "
-           "RobotInterlock -> MotionController\n"
-        << "[SMOKE_TEST] Logical joint home: base=0 lower=0 upper=0 grip=0\n"
-        << "[SMOKE_TEST] PCA9685 neutral pulse for first run: "
-        << kSmokeNeutralPulseTicks << " ticks\n"
-        << "[SMOKE_TEST] Guardian thresholds: freeze after "
-        << kSmokeFreezeBadFrameThreshold
-        << " bad frame, recover after "
-        << kSmokeRecoverGoodFrameThreshold
-        << " good frame\n"
-        << "[SMOKE_TEST] Initial per-joint sweep limits:\n";
-
-    for (const SmokeJointSpec& spec : kSmokeJointSpecs) {
-        std::cout << "[SMOKE_TEST]   " << spec.logical_name
-                  << " -> channel " << static_cast<int>(spec.channel)
-                  << " -> " << spec.mearm_name
-                  << " limits [" << spec.min_offset << ", " << spec.max_offset
-                  << "]"
-                  << std::endl;
-    }
-
-    std::cout
-        << "[SMOKE_TEST] Sequence: HOME (freeze/recover) -> BASE 0 -> BASE -90 -> "
-           "BASE +90 -> BASE 0 -> LOWER 0 -> LOWER -90 -> LOWER +90 -> LOWER 0 -> "
-           "UPPER 0 -> UPPER -90 -> UPPER +90 -> UPPER 0 -> GRIP 0 -> GRIP -90 -> "
-           "GRIP +90 -> GRIP 0\n"
-        << "[SMOKE_TEST] Every command is clamped to the offset windows above and "
-           "held for 3 seconds.\n";
+        << "[SMOKE] joint=" << smokeJointSelectionToString(options.joint)
+        << " 0 -> -90 -> +90 -> 0"
+        << "  wait=3s\n";
 
     MotionChannelMap channel_map{};
     channel_map.base = 0;
@@ -550,159 +412,115 @@ int AppController::runMotionSmokeTest() {
                                        kDefaultPca9685Address,
                                        kDefaultPwmFrequencyHz,
                                        channel_map)) {
-        std::cerr << "[SMOKE_TEST] Motion controller initialization failed: "
+        std::cerr << "[SMOKE] init failed: "
                   << motion_controller_.lastErrorString() << std::endl;
         return 1;
     }
 
-    MotionControllerHardwareAdapter hardware(motion_controller_);
-    RobotInterlock interlock(hardware);
-    GuardianStateMachine guardian(kSmokeFreezeBadFrameThreshold,
-                                  kSmokeRecoverGoodFrameThreshold);
-
-    guardian.setOnFreezeCallback([&]() {
-        interlock.onControlEvent(ControlEvent::FREEZE_NOW, FreezeReason::UNKNOWN_FAULT);
-    });
-
-    guardian.setOnClearFreezeCallback([&]() {
-        interlock.onControlEvent(ControlEvent::ALLOW_MOTION);
-    });
-
-    guardian.setOnStateChangeCallback([&](GuardianState from, GuardianState to) {
-        std::cout << "[SMOKE_TEST] guardian " << guardian.stateToString(from) << " -> "
-                  << guardian.stateToString(to) << std::endl;
-    });
-
     auto fail = [&](const std::string& message) {
-        std::cerr << "[SMOKE_TEST] " << message << std::endl;
+        std::cerr << "[SMOKE] " << message << std::endl;
         motion_controller_.shutdown();
         return 1;
     };
 
-    auto logStatus = [&](const char* phase) {
-        std::cout << "[SMOKE_TEST] phase=" << phase
-                  << " guardian=" << guardian.getCurrentStateString()
-                  << " interlock=" << interlockStateToString(interlock.state())
-                  << " motion_ctrl="
-                  << motionControllerStateToString(motion_controller_.outputState())
-                  << " allowed=" << (interlock.motionAllowed() ? "YES" : "NO")
-                  << std::endl;
+    auto makeJointOffsets = [](std::size_t joint_index, int joint_offset) {
+        SmokeJointOffsets offsets{};
+        switch (joint_index) {
+            case 0:
+                offsets.base = joint_offset;
+                break;
+            case 1:
+                offsets.lower = joint_offset;
+                break;
+            case 2:
+                offsets.upper = joint_offset;
+                break;
+            case 3:
+                offsets.grip = joint_offset;
+                break;
+            default:
+                break;
+        }
+        return offsets;
     };
 
-    auto stagePose = [&](const SmokePose& pose) {
+    auto stagePose = [&](const std::string& label,
+                         const SmokeJointOffsets& requested) {
         bool clamped = false;
-        const SmokeJointOffsets bounded = clampSmokeOffsets(pose.offsets, clamped);
+        const SmokeJointOffsets bounded = clampSmokeOffsets(requested, clamped);
         const MeArmJointTargets targets = makeSmokeTargets(bounded, clamped);
 
-        if (clamped) {
-            std::cout << "[SMOKE_TEST] " << pose.name << " requested "
-                      << formatOffsets(pose.offsets) << " clamped to "
-                      << formatOffsets(bounded) << std::endl;
-        }
-
         if (!motion_controller_.setTargets(targets)) {
-            return fail(std::string("failed to stage pose ") + pose.name + ": " +
+            return fail(std::string("failed to stage pose ") + label + ": " +
                         motion_controller_.lastErrorString());
         }
 
-        std::cout << "[SMOKE_TEST] " << pose.name << " offsets "
-                  << formatOffsets(bounded) << " targets "
-                  << formatTargets(targets) << " ("
-                  << (interlock.motionAllowed() ? "live" : "staged") << ")"
-                  << std::endl;
-        return 0;
-    };
-
-    auto freezeAndRecoverToPose = [&](const SmokePose& pose) {
-        std::cout << "[SMOKE_TEST] cycle: freeze -> stage " << pose.name
-                  << " -> recover" << std::endl;
-
-        guardian.processFrame(FrameStatus::FRAME_BAD);
-        if (guardian.getState() != GuardianState::FROZEN_UNSAFE ||
-            interlock.state() != InterlockState::FROZEN) {
-            return fail(std::string("guardian/interlock did not freeze before ") +
-                        pose.name);
+        std::cout << "[SMOKE] " << label;
+        if (clamped) {
+            std::cout << " [clamped]";
         }
-
-        if (interlock.state() == InterlockState::FAULT ||
-            motion_controller_.outputState() == MotionOutputState::FAULT) {
-            return fail(std::string("fault while freezing before ") + pose.name);
-        }
-
-        logStatus("frozen");
-
-        if (stagePose(pose) != 0) {
-            return 1;
-        }
-
-        std::this_thread::sleep_for(kSmokeTransitionPause);
-
-        guardian.operatorAcknowledge();
-        interlock.operatorAcknowledge();
-        guardian.processFrame(FrameStatus::FRAME_GOOD);
-        if (interlock.state() == InterlockState::FAULT ||
-            motion_controller_.outputState() == MotionOutputState::FAULT) {
-            return fail(std::string("fault while recovering to ") + pose.name);
-        }
-
-        if (!interlock.motionAllowed() ||
-            guardian.getState() != GuardianState::SAFE_MONITORING) {
-            return fail(std::string("interlock did not re-enable cleanly for ") +
-                        pose.name);
-        }
-
-        logStatus(pose.name);
+        std::cout << std::endl;
+        std::cout << "[SMOKE] wait 3s" << std::endl;
         std::this_thread::sleep_for(kSmokeStepDwell);
         return 0;
     };
 
-    auto liveMove = [&](const SmokePose& pose) {
-        if (!interlock.motionAllowed() || interlock.state() != InterlockState::SAFE) {
-            return fail(std::string("motion not allowed before live move ") + pose.name);
-        }
+    bool home_clamped = false;
+    const MeArmJointTargets home_targets =
+        makeSmokeTargets(kSmokeHomePose, home_clamped);
 
-        if (stagePose(pose) != 0) {
+    if (!motion_controller_.setTargets(home_targets)) {
+        return fail(std::string("failed to stage home pose: ") +
+                    motion_controller_.lastErrorString());
+    }
+
+    if (!motion_controller_.enable()) {
+        return fail(std::string("failed to enable motion: ") +
+                    motion_controller_.lastErrorString());
+    }
+
+    std::cout << "[SMOKE] all -> 0" << std::endl;
+    std::cout << "[SMOKE] wait 3s" << std::endl;
+    std::this_thread::sleep_for(kSmokeStepDwell);
+
+    const SmokeJointRunPlan plan = makeSmokeJointRunPlan(options.joint);
+    if (plan.count == 0) {
+        return fail("no smoke-test joint selected");
+    }
+
+    auto runJointSweep = [&](std::size_t index) {
+        const SmokeJointSpec& spec = kSmokeJointSpecs[index];
+        std::cout << "[SMOKE] " << spec.logical_name << std::endl;
+
+        const std::string home_label = std::string(spec.logical_name) + " -> 0";
+        const std::string neg_label = std::string(spec.logical_name) + " -> -90";
+        const std::string pos_label = std::string(spec.logical_name) + " -> +90";
+
+        if (stagePose(home_label, makeJointOffsets(index, 0)) != 0) {
+            return 1;
+        }
+        if (stagePose(neg_label, makeJointOffsets(index, kSmokeNegativeStep)) != 0) {
+            return 1;
+        }
+        if (stagePose(pos_label, makeJointOffsets(index, kSmokePositiveStep)) != 0) {
+            return 1;
+        }
+        if (stagePose(home_label, makeJointOffsets(index, 0)) != 0) {
             return 1;
         }
 
-        logStatus(pose.name);
-        std::this_thread::sleep_for(kSmokeStepDwell);
         return 0;
     };
 
-    logStatus("startup");
-
-    const std::array<SmokePose, 17> smoke_sequence = {{
-        {"HOME", kSmokeHomePose, true},
-        {"BASE 0", kSmokeHomePose, false},
-        {"BASE -90", kSmokeBaseNegativePose, false},
-        {"BASE +90", kSmokeBasePositivePose, false},
-        {"BASE 0", kSmokeHomePose, false},
-        {"LOWER 0", kSmokeHomePose, false},
-        {"LOWER -90", kSmokeLowerNegativePose, false},
-        {"LOWER +90", kSmokeLowerPositivePose, false},
-        {"LOWER 0", kSmokeHomePose, false},
-        {"UPPER 0", kSmokeHomePose, false},
-        {"UPPER -90", kSmokeUpperNegativePose, false},
-        {"UPPER +90", kSmokeUpperPositivePose, false},
-        {"UPPER 0", kSmokeHomePose, false},
-        {"GRIP 0", kSmokeHomePose, false},
-        {"GRIP -90", kSmokeGripNegativePose, false},
-        {"GRIP +90", kSmokeGripPositivePose, false},
-        {"GRIP 0", kSmokeHomePose, false},
-    }};
-
-    for (const SmokePose& pose : smoke_sequence) {
-        const int result = pose.stage_while_frozen ? freezeAndRecoverToPose(pose)
-                                                   : liveMove(pose);
-        if (result != 0) {
+    for (std::size_t i = 0; i < plan.count; ++i) {
+        if (runJointSweep(plan.indices[i]) != 0) {
             motion_controller_.shutdown();
-            return result;
+            return 1;
         }
     }
 
     motion_controller_.shutdown();
-    std::cout << "[SMOKE_TEST] Motion smoke test complete." << std::endl;
+    std::cout << "[SMOKE] done" << std::endl;
     return 0;
 }
 

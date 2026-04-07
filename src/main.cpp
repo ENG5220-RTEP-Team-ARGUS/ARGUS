@@ -10,15 +10,39 @@ void printUsage(const char* program_name) {
     std::cout
         << "Usage:\n"
         << "  " << program_name << "                Run Guardian FSM scenario demo\n"
-        << "  " << program_name << " --motion-smoke-test\n"
+        << "  " << program_name << " --motion-smoke-test [options]\n"
         << "  " << program_name << " --live-test [options]\n"
         << "\nOptions:\n"
-        << "  --motion-smoke-test       Run the motion-only servo smoke test\n"
+        << "  --motion-smoke-test       Run the motion-only servo smoke test (all joints by default)\n"
+        << "  --base                    Smoke-test only the base servo\n"
+        << "  --lower                   Smoke-test only the lower servo\n"
+        << "  --upper                   Smoke-test only the upper servo\n"
+        << "  --grip                    Smoke-test only the grip servo\n"
         << "\nOptions for --live-test:\n"
         << "  --camera-index <n>        Camera index (default: 0)\n"
         << "  --expected-marker-id <n>  Expected ArUco marker ID (default: 23)\n"
         << "  --auto-ack                Auto-send operator acknowledge when frozen\n"
         << "  --help                    Show this message\n";
+}
+
+bool parseSmokeJointFlag(const std::string& arg, AppController::SmokeJoint& joint) {
+    if (arg == "--base") {
+        joint = AppController::SmokeJoint::Base;
+        return true;
+    }
+    if (arg == "--lower") {
+        joint = AppController::SmokeJoint::Lower;
+        return true;
+    }
+    if (arg == "--upper") {
+        joint = AppController::SmokeJoint::Upper;
+        return true;
+    }
+    if (arg == "--grip") {
+        joint = AppController::SmokeJoint::Grip;
+        return true;
+    }
+    return false;
 }
 
 bool parseIntArg(const char* text, int& value) {
@@ -42,6 +66,8 @@ int main(int argc, char* argv[]) {
     bool run_live_test = false;
     bool run_motion_smoke_test = false;
     AppController::LiveTestOptions options;
+    AppController::MotionSmokeTestOptions smoke_options;
+    bool smoke_joint_selected = false;
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg(argv[i]);
@@ -58,6 +84,17 @@ int main(int argc, char* argv[]) {
 
         if (arg == "--motion-smoke-test") {
             run_motion_smoke_test = true;
+            continue;
+        }
+
+        if (parseSmokeJointFlag(arg, smoke_options.joint)) {
+            if (smoke_joint_selected) {
+                std::cerr << "Choose one smoke-test joint flag at a time." << std::endl;
+                printUsage(argv[0]);
+                return 1;
+            }
+            run_motion_smoke_test = true;
+            smoke_joint_selected = true;
             continue;
         }
 
@@ -99,7 +136,7 @@ int main(int argc, char* argv[]) {
 
     AppController app_controller;
     if (run_motion_smoke_test) {
-        return app_controller.runMotionSmokeTest();
+        return app_controller.runMotionSmokeTest(smoke_options);
     }
 
     if (run_live_test) {
