@@ -65,6 +65,53 @@ Options:
 - `--auto-ack`: auto-send operator acknowledge when frozen (test convenience)
 - `--help`: print usage
 
+### 3) Motion smoke test (hardware in the loop)
+Runs a short, conservative arm motion sequence through the existing safety path:
+
+`AppController -> GuardianStateMachine -> RobotInterlock -> MotionController`
+
+```bash
+./build/ARGUS --motion-smoke-test
+```
+
+This mode does not use the camera pipeline. It is meant to confirm:
+- PCA9685 I2C output is working
+- the MeArm channel mapping is correct
+- `RobotInterlock` freezes and re-enables motion correctly
+- actuation still depends on guardian/interlock state
+
+The smoke test uses zero-centered logical joint offsets and conservative clamp windows:
+- base: `[-20, +20]`
+- lower: `[-15, +15]`
+- upper: `[-15, +15]`
+- grip: `[-15, +15]`
+
+Validated hardware mapping:
+- base -> channel `0` -> MeArm `BASE`
+- lower -> channel `1` -> MeArm `RIGHT`
+- upper -> channel `2` -> MeArm `LEFT`
+- grip -> channel `3` -> MeArm `CLAW`
+
+Sequence:
+1. Move to home pose
+2. Freeze/recover once while staging `base +15`
+3. Return to home
+4. Sweep `base -15` and back home
+5. Sweep `lower +10` and back home
+6. Sweep `lower -10` and back home
+7. Sweep `upper +10` and back home
+8. Sweep `upper -10` and back home
+9. Sweep `grip +10` and back home
+10. Sweep `grip -10` and back home
+11. Return to home
+
+Every command is clamped in software before it reaches the motion controller. If the
+sequence needs to be tightened further for a mechanically sensitive build, reduce the
+step constants in `src/AppController.cpp` and rerun the smoke test.
+
+If the motion controller faults at any step, the mode shuts down the outputs and exits
+without continuing the sequence.
+
 ## Live-test controls (window)
 When `--live-test` is running:
 - `a`: arm guardian enforcement (only allowed if current reading is safe)

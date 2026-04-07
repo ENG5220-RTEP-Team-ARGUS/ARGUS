@@ -14,6 +14,7 @@ public:
     ~AppController() noexcept;
 
     int runGuardianScenarioDemo();
+    int runMotionSmokeTest();
     int runLiveMarkerTest(const LiveTestOptions& options);
 
 private:

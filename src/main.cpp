@@ -10,7 +10,10 @@ void printUsage(const char* program_name) {
     std::cout
         << "Usage:\n"
         << "  " << program_name << "                Run Guardian FSM scenario demo\n"
+        << "  " << program_name << " --motion-smoke-test\n"
         << "  " << program_name << " --live-test [options]\n"
+        << "\nOptions:\n"
+        << "  --motion-smoke-test       Run the hardware-in-the-loop motion smoke test\n"
         << "\nOptions for --live-test:\n"
         << "  --camera-index <n>        Camera index (default: 0)\n"
         << "  --expected-marker-id <n>  Expected ArUco marker ID (default: 23)\n"
@@ -37,6 +40,7 @@ bool parseIntArg(const char* text, int& value) {
 
 int main(int argc, char* argv[]) {
     bool run_live_test = false;
+    bool run_motion_smoke_test = false;
     AppController::LiveTestOptions options;
 
     for (int i = 1; i < argc; ++i) {
@@ -49,6 +53,11 @@ int main(int argc, char* argv[]) {
 
         if (arg == "--live-test") {
             run_live_test = true;
+            continue;
+        }
+
+        if (arg == "--motion-smoke-test") {
+            run_motion_smoke_test = true;
             continue;
         }
 
@@ -81,7 +90,18 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    if (run_live_test && run_motion_smoke_test) {
+        std::cerr << "Choose exactly one mode: --live-test or --motion-smoke-test."
+                  << std::endl;
+        printUsage(argv[0]);
+        return 1;
+    }
+
     AppController app_controller;
+    if (run_motion_smoke_test) {
+        return app_controller.runMotionSmokeTest();
+    }
+
     if (run_live_test) {
         return app_controller.runLiveMarkerTest(options);
     }
