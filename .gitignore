@@ -16,6 +16,7 @@
 
 # Debugger Files
 *.pdb
+*.codex
 
 # Compiled Dynamic libraries
 *.so

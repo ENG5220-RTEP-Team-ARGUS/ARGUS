@@ -138,6 +138,60 @@ step constants in `src/AppController.cpp` and rerun the smoke test.
 If the motion controller faults at any step, the mode shuts down the outputs and exits
 without continuing the sequence.
 
+### 4) Full pipeline hardware demo
+Runs camera + vision + guardian + interlock + motion through the normal safety path.
+This is the first end-to-end hardware demo on the Pi.
+
+```bash
+./scripts/full_demo.sh --camera-index 0 --expected-marker-id 23
+```
+
+or, if you prefer to invoke the binary directly:
+
+```bash
+libcamerify ./build/ARGUS --full-demo --camera-index 0 --expected-marker-id 23
+```
+
+Convenience wrapper:
+- `scripts/full_demo.sh`
+
+What it does:
+- waits for a safe camera view
+- stages `HOME`
+- primes a single freeze so the physical ACK button can start motion through the normal guardian/interlock recovery path
+- the first physical ACK starts the dance; later freezes use the same safe-again + ACK recovery
+- then runs a conservative repeating dance:
+  - `BASE +15`
+  - `BASE -15`
+  - `HOME`
+  - `LOWER +10`
+  - `LOWER -10`
+  - `HOME`
+  - `UPPER +10`
+  - `UPPER -10`
+  - `HOME`
+  - `GRIP +10`
+  - `GRIP -10`
+  - `HOME`
+
+Behavior:
+- freeze immediately when the ArUco marker is lost
+- when the marker is visible again, the app logs `safe again` and `waiting for ACK`
+- press the physical ACK button to continue the normal recovery path
+- motion resumes only after the guardian reaches its safe state again
+- `--auto-ack` is intentionally disabled in this mode
+
+Expected terminal messages are short:
+- `pose=HOME`
+- `freeze: MARKER_LOST`
+- `safe again`
+- `waiting for ACK`
+- `ACK accepted -> recovery`
+- `resume`
+
+If the ACK button module is unavailable, the demo exits early because this mode
+requires the physical button.
+
 ## Live-test controls (window)
 When `--live-test` is running:
 - `a`: arm guardian enforcement (only allowed if current reading is safe)

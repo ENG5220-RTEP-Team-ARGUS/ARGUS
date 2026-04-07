@@ -27,6 +27,7 @@ public:
 
     int runGuardianScenarioDemo();
     int runMotionSmokeTest(const MotionSmokeTestOptions& options);
+    int runFullPipelineDemo(const LiveTestOptions& options);
     int runLiveMarkerTest(const LiveTestOptions& options);
 
 private:

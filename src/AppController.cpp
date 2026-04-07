@@ -27,6 +27,11 @@ constexpr std::uint8_t kBaseServoChannel = 0;
 constexpr std::uint8_t kLowerServoChannel = 4;
 constexpr std::uint8_t kUpperServoChannel = 8;
 constexpr std::uint8_t kGripServoChannel = 12;
+constexpr MotionChannelMap kMotionChannelMap{
+    kBaseServoChannel,
+    kLowerServoChannel,
+    kUpperServoChannel,
+    kGripServoChannel};
 constexpr int kLiveFreezeBadFrameThreshold = 30;
 constexpr int kLiveRecoverGoodFrameThreshold = 3;
 constexpr std::chrono::milliseconds kSmokeStepDwell{3000};
@@ -41,6 +46,21 @@ constexpr int kSmokeGripMinOffset = -90;
 constexpr int kSmokeGripMaxOffset = 90;
 constexpr int kSmokePositiveStep = 90;
 constexpr int kSmokeNegativeStep = -90;
+constexpr int kDemoFreezeBadFrameThreshold = 1;
+constexpr int kDemoRecoverGoodFrameThreshold = 3;
+constexpr std::chrono::milliseconds kDemoStepDwell{1000};
+constexpr int kDemoBaseMinOffset = -20;
+constexpr int kDemoBaseMaxOffset = 20;
+constexpr int kDemoLowerMinOffset = -15;
+constexpr int kDemoLowerMaxOffset = 15;
+constexpr int kDemoUpperMinOffset = -15;
+constexpr int kDemoUpperMaxOffset = 15;
+constexpr int kDemoGripMinOffset = -12;
+constexpr int kDemoGripMaxOffset = 12;
+constexpr int kDemoBaseStep = 15;
+constexpr int kDemoLowerStep = 10;
+constexpr int kDemoUpperStep = 10;
+constexpr int kDemoGripStep = 10;
 
 class MotionControllerHardwareAdapter final : public RobotHardware {
 public:
@@ -208,13 +228,35 @@ struct SmokeJointRunPlan {
 };
 
 constexpr std::array<SmokeJointSpec, MotionController::kServoCount> kSmokeJointSpecs = {{
-    {"base", "MeArm BASE", "yaw left/right", kBaseServoChannel, kSmokeBaseMinOffset, kSmokeBaseMaxOffset},
-    {"lower", "MeArm LEFT", "raise/lower", kLowerServoChannel, kSmokeLowerMinOffset, kSmokeLowerMaxOffset},
-    {"upper", "MeArm RIGHT", "bend/extend", kUpperServoChannel, kSmokeUpperMinOffset, kSmokeUpperMaxOffset},
-    {"grip", "MeArm CLAW", "open/close", kGripServoChannel, kSmokeGripMinOffset, kSmokeGripMaxOffset},
+    {"base", "MeArm BASE", "yaw left/right", kMotionChannelMap.base, kSmokeBaseMinOffset, kSmokeBaseMaxOffset},
+    {"lower", "MeArm LEFT", "raise/lower", kMotionChannelMap.lower, kSmokeLowerMinOffset, kSmokeLowerMaxOffset},
+    {"upper", "MeArm RIGHT", "bend/extend", kMotionChannelMap.upper, kSmokeUpperMinOffset, kSmokeUpperMaxOffset},
+    {"grip", "MeArm CLAW", "open/close", kMotionChannelMap.gripper, kSmokeGripMinOffset, kSmokeGripMaxOffset},
 }};
 
 constexpr SmokeJointOffsets kSmokeHomePose{0, 0, 0, 0};
+
+struct DemoPoseStep {
+    const char* name;
+    SmokeJointOffsets offsets;
+};
+
+constexpr DemoPoseStep kDemoHomeStep{"HOME", kSmokeHomePose};
+
+constexpr std::array<DemoPoseStep, 12> kDemoSequence = {{
+    {"BASE +15", {kDemoBaseStep, 0, 0, 0}},
+    {"BASE -15", {-kDemoBaseStep, 0, 0, 0}},
+    {"HOME", {0, 0, 0, 0}},
+    {"LOWER +10", {0, kDemoLowerStep, 0, 0}},
+    {"LOWER -10", {0, -kDemoLowerStep, 0, 0}},
+    {"HOME", {0, 0, 0, 0}},
+    {"UPPER +10", {0, 0, kDemoUpperStep, 0}},
+    {"UPPER -10", {0, 0, -kDemoUpperStep, 0}},
+    {"HOME", {0, 0, 0, 0}},
+    {"GRIP +10", {0, 0, 0, kDemoGripStep}},
+    {"GRIP -10", {0, 0, 0, -kDemoGripStep}},
+    {"HOME", {0, 0, 0, 0}},
+}};
 
 const char* smokeJointSelectionToString(AppController::SmokeJoint joint) {
     switch (joint) {
@@ -274,26 +316,50 @@ int clampOffsetValue(int value, int min_value, int max_value, bool& clamped) {
     return bounded;
 }
 
+SmokeJointOffsets clampOffsetsToWindow(const SmokeJointOffsets& requested,
+                                       int base_min,
+                                       int base_max,
+                                       int lower_min,
+                                       int lower_max,
+                                       int upper_min,
+                                       int upper_max,
+                                       int grip_min,
+                                       int grip_max,
+                                       bool& clamped) {
+    SmokeJointOffsets bounded = requested;
+    bounded.base = clampOffsetValue(requested.base, base_min, base_max, clamped);
+    bounded.lower = clampOffsetValue(requested.lower, lower_min, lower_max, clamped);
+    bounded.upper = clampOffsetValue(requested.upper, upper_min, upper_max, clamped);
+    bounded.grip = clampOffsetValue(requested.grip, grip_min, grip_max, clamped);
+    return bounded;
+}
+
 SmokeJointOffsets clampSmokeOffsets(const SmokeJointOffsets& requested,
                                     bool& clamped) {
-    SmokeJointOffsets bounded = requested;
-    bounded.base = clampOffsetValue(requested.base,
-                                    kSmokeBaseMinOffset,
-                                    kSmokeBaseMaxOffset,
-                                    clamped);
-    bounded.lower = clampOffsetValue(requested.lower,
-                                     kSmokeLowerMinOffset,
-                                     kSmokeLowerMaxOffset,
-                                     clamped);
-    bounded.upper = clampOffsetValue(requested.upper,
-                                     kSmokeUpperMinOffset,
-                                     kSmokeUpperMaxOffset,
-                                     clamped);
-    bounded.grip = clampOffsetValue(requested.grip,
-                                    kSmokeGripMinOffset,
-                                    kSmokeGripMaxOffset,
-                                    clamped);
-    return bounded;
+    return clampOffsetsToWindow(requested,
+                                kSmokeBaseMinOffset,
+                                kSmokeBaseMaxOffset,
+                                kSmokeLowerMinOffset,
+                                kSmokeLowerMaxOffset,
+                                kSmokeUpperMinOffset,
+                                kSmokeUpperMaxOffset,
+                                kSmokeGripMinOffset,
+                                kSmokeGripMaxOffset,
+                                clamped);
+}
+
+SmokeJointOffsets clampDemoOffsets(const SmokeJointOffsets& requested,
+                                   bool& clamped) {
+    return clampOffsetsToWindow(requested,
+                                kDemoBaseMinOffset,
+                                kDemoBaseMaxOffset,
+                                kDemoLowerMinOffset,
+                                kDemoLowerMaxOffset,
+                                kDemoUpperMinOffset,
+                                kDemoUpperMaxOffset,
+                                kDemoGripMinOffset,
+                                kDemoGripMaxOffset,
+                                clamped);
 }
 
 std::uint16_t offsetToPulseTicks(int offset, bool& clamped) {
@@ -309,6 +375,16 @@ std::uint16_t offsetToPulseTicks(int offset, bool& clamped) {
 MeArmJointTargets makeSmokeTargets(const SmokeJointOffsets& requested,
                                    bool& clamped) {
     const SmokeJointOffsets bounded = clampSmokeOffsets(requested, clamped);
+    return {
+        offsetToPulseTicks(bounded.base, clamped),
+        offsetToPulseTicks(bounded.lower, clamped),
+        offsetToPulseTicks(bounded.upper, clamped),
+        offsetToPulseTicks(bounded.grip, clamped)};
+}
+
+MeArmJointTargets makeDemoTargets(const SmokeJointOffsets& requested,
+                                  bool& clamped) {
+    const SmokeJointOffsets bounded = clampDemoOffsets(requested, clamped);
     return {
         offsetToPulseTicks(bounded.base, clamped),
         offsetToPulseTicks(bounded.lower, clamped),
@@ -525,6 +601,327 @@ int AppController::runMotionSmokeTest(const MotionSmokeTestOptions& options) {
 
     motion_controller_.shutdown();
     std::cout << "[SMOKE] done" << std::endl;
+    return 0;
+}
+
+int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
+    if (options.auto_ack) {
+        std::cerr << "[DEMO] --auto-ack is not supported in full-demo mode."
+                  << std::endl;
+        return 1;
+    }
+
+    std::cout
+        << "[DEMO] full pipeline hardware demo\n"
+        << "[DEMO] camera=" << options.camera_index
+        << " marker=" << options.expected_marker_id << "\n"
+        << "[DEMO] map base=0 lower=4 upper=8 grip=12\n"
+        << "[DEMO] sequence HOME -> BASE +/-15 -> LOWER +/-10 -> UPPER +/-10 -> GRIP +/-10\n"
+        << "[DEMO] freeze after 1 bad frame, recover after 3 good frames\n"
+        << "[DEMO] physical ACK required after recovery\n";
+
+    if (!motion_controller_.initialise(kDefaultI2cDevicePath,
+                                       kDefaultPca9685Address,
+                                       kDefaultPwmFrequencyHz,
+                                       kMotionChannelMap)) {
+        std::cerr << "[DEMO] motion init failed: "
+                  << motion_controller_.lastErrorString() << std::endl;
+        return 1;
+    }
+
+    MotionControllerHardwareAdapter hardware(motion_controller_);
+    VisionConfig vision_config;
+    vision_config.expectedMarkerId = options.expected_marker_id;
+    VisionProcessor vision_processor(vision_config);
+    CameraCapture camera_capture(options.camera_index);
+    PhysicalButtonModule button_module;
+    if (!button_module.available()) {
+        std::cerr << "[DEMO] physical ACK button unavailable: "
+                  << button_module.lastErrorString() << std::endl;
+        motion_controller_.shutdown();
+        return 1;
+    }
+
+    GuardianStateMachine guardian(kDemoFreezeBadFrameThreshold,
+                                  kDemoRecoverGoodFrameThreshold);
+    RobotInterlock interlock(hardware);
+
+    bool motion_gate_open = false;
+    bool waiting_for_ack = false;
+    bool waiting_for_ack_announced = false;
+    bool prime_freeze_pending = false;
+    bool prime_triggered = false;
+    bool scene_is_safe = false;
+    bool scene_was_safe = false;
+    bool motion_faulted = false;
+    bool processed_any_frame = false;
+    SafetyState current_vision_state = SafetyState::SAFE;
+    FreezeReason pending_reason = FreezeReason::UNKNOWN_FAULT;
+    bool home_pose_staged = false;
+    std::size_t next_step_index = 0;
+    std::chrono::steady_clock::time_point next_step_due =
+        std::chrono::steady_clock::now();
+
+    auto fail = [&](const std::string& message) {
+        std::cerr << "[DEMO] " << message << std::endl;
+        motion_controller_.shutdown();
+        return 1;
+    };
+
+    auto stagePose = [&](const DemoPoseStep& step) -> bool {
+        bool clamped = false;
+        const MeArmJointTargets targets = makeDemoTargets(step.offsets, clamped);
+
+        if (!motion_controller_.setTargets(targets)) {
+            (void)fail(std::string("failed to stage pose ") + step.name + ": " +
+                       motion_controller_.lastErrorString());
+            return false;
+        }
+
+        std::cout << "[DEMO] pose=" << step.name;
+        if (clamped) {
+            std::cout << " [clamped]";
+        }
+        std::cout << " wait=1s" << std::endl;
+        return true;
+    };
+
+    auto requestAcknowledge = [&]() -> bool {
+        if (!scene_is_safe) {
+            std::cout << "[DEMO] ACK ignored: scene not safe" << std::endl;
+            return true;
+        }
+
+        if (guardian.getState() != GuardianState::FROZEN_UNSAFE) {
+            std::cout << "[DEMO] ACK ignored: not frozen" << std::endl;
+            return true;
+        }
+
+        guardian.operatorAcknowledge();
+        interlock.operatorAcknowledge();
+        waiting_for_ack = false;
+        waiting_for_ack_announced = false;
+        std::cout << "[DEMO] ACK accepted -> recovery" << std::endl;
+        return interlock.state() != InterlockState::FAULT;
+    };
+
+    auto requestFromButton = [&](PhysicalButtonEvent event) -> bool {
+        std::cout << "[BUTTON] " << PhysicalButtonModule::eventToString(event)
+                  << std::endl;
+        switch (event) {
+            case PhysicalButtonEvent::ACK_REQUEST:
+                return requestAcknowledge();
+            case PhysicalButtonEvent::ARM_REQUEST:
+            case PhysicalButtonEvent::DISARM_REQUEST:
+                std::cout << "[DEMO] button ignored" << std::endl;
+                return true;
+        }
+        return true;
+    };
+
+    guardian.setOnFreezeCallback([&]() {
+        motion_gate_open = false;
+        waiting_for_ack = false;
+        waiting_for_ack_announced = false;
+
+        if (prime_freeze_pending) {
+            std::cout << "[DEMO] prime freeze" << std::endl;
+            prime_freeze_pending = false;
+        } else {
+            std::cout << "[DEMO] freeze: "
+                      << freezeReasonToString(pending_reason) << std::endl;
+        }
+
+        interlock.onControlEvent(ControlEvent::FREEZE_NOW, pending_reason);
+        if (interlock.state() == InterlockState::FAULT) {
+            motion_faulted = true;
+        }
+    });
+
+    guardian.setOnClearFreezeCallback([&]() {
+        interlock.onControlEvent(ControlEvent::ALLOW_MOTION);
+        if (interlock.state() == InterlockState::FAULT) {
+            motion_faulted = true;
+            return;
+        }
+
+        motion_gate_open = true;
+        next_step_due = std::chrono::steady_clock::now() + kDemoStepDwell;
+        std::cout << "[DEMO] resume" << std::endl;
+    });
+
+    guardian.setOnStateChangeCallback([&](GuardianState from, GuardianState to) {
+        std::cout << "[DEMO] guardian=" << guardian.stateToString(from)
+                  << " -> " << guardian.stateToString(to) << std::endl;
+    });
+
+    auto announceSceneState = [&](bool safe_now) {
+        if (safe_now == scene_was_safe) {
+            return;
+        }
+
+        scene_was_safe = safe_now;
+        if (safe_now) {
+            std::cout << "[DEMO] "
+                      << (prime_triggered ? "safe again" : "scene safe")
+                      << std::endl;
+        } else {
+            std::cout << "[DEMO] scene unsafe" << std::endl;
+        }
+    };
+
+    auto updateWaitingState = [&]() {
+        const bool should_wait_for_ack =
+            scene_is_safe && guardian.getState() == GuardianState::FROZEN_UNSAFE;
+
+        if (should_wait_for_ack && !waiting_for_ack_announced) {
+            std::cout << "[DEMO] waiting for ACK" << std::endl;
+            waiting_for_ack_announced = true;
+        }
+
+        waiting_for_ack = should_wait_for_ack;
+        if (!should_wait_for_ack) {
+            waiting_for_ack_announced = false;
+        }
+    };
+
+    auto primeStartupFreeze = [&]() -> bool {
+        if (prime_triggered || !scene_is_safe) {
+            return true;
+        }
+
+        if (!stagePose(kDemoHomeStep)) {
+            return false;
+        }
+
+        prime_triggered = true;
+        prime_freeze_pending = true;
+        pending_reason = FreezeReason::UNKNOWN_FAULT;
+        guardian.processFrame(FrameStatus::FRAME_BAD);
+        return !motion_faulted && interlock.state() != InterlockState::FAULT;
+    };
+
+    auto maybeAdvanceDemoPose = [&]() -> bool {
+        if (!motion_gate_open || waiting_for_ack) {
+            return true;
+        }
+
+        if (std::chrono::steady_clock::now() < next_step_due) {
+            return true;
+        }
+
+        const DemoPoseStep& step = kDemoSequence[next_step_index];
+        if (!stagePose(step)) {
+            return false;
+        }
+
+        next_step_index = (next_step_index + 1) % kDemoSequence.size();
+        next_step_due = std::chrono::steady_clock::now() + kDemoStepDwell;
+        return true;
+    };
+
+    FrameEvent frame_event;
+    int consecutive_capture_failures = 0;
+
+    while (true) {
+        if (interlock.state() == InterlockState::FAULT) {
+            motion_faulted = true;
+            std::cerr << "[DEMO] interlock fault (motion controller: "
+                      << motion_controller_.lastErrorString() << ")" << std::endl;
+            break;
+        }
+
+        if (!camera_capture.waitForNextFrame(frame_event)) {
+            ++consecutive_capture_failures;
+            std::cerr << "[DEMO] frame capture failed ("
+                      << consecutive_capture_failures
+                      << "/30). Retrying..." << std::endl;
+
+            if (consecutive_capture_failures >= 30) {
+                break;
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            continue;
+        }
+
+        consecutive_capture_failures = 0;
+        processed_any_frame = true;
+
+        const auto now = std::chrono::steady_clock::now();
+        const SafetyResult result =
+            vision_processor.process(frame_event.image_data, now);
+
+        current_vision_state = result.state;
+        scene_is_safe = (current_vision_state == SafetyState::SAFE);
+        if (!scene_is_safe) {
+            pending_reason = mapSafetyToFreezeReason(current_vision_state);
+        }
+
+        const GuardianState guardian_state_before_update = guardian.getState();
+        if (guardian_state_before_update == GuardianState::SAFE_MONITORING ||
+            guardian_state_before_update == GuardianState::RESET_PENDING) {
+            guardian.processFrame(scene_is_safe ? FrameStatus::FRAME_GOOD
+                                                : FrameStatus::FRAME_BAD);
+        }
+        announceSceneState(scene_is_safe);
+
+        if (scene_is_safe && !home_pose_staged) {
+            if (!stagePose(kDemoHomeStep)) {
+                motion_faulted = true;
+                break;
+            }
+            home_pose_staged = true;
+        }
+
+        if (!prime_triggered && scene_is_safe &&
+            guardian.getState() == GuardianState::SAFE_MONITORING) {
+            if (!primeStartupFreeze()) {
+                motion_faulted = true;
+                break;
+            }
+        }
+
+        updateWaitingState();
+
+        PhysicalButtonEvent button_event;
+        while (button_module.poll(button_event)) {
+            if (!requestFromButton(button_event)) {
+                motion_faulted = true;
+                break;
+            }
+        }
+
+        if (motion_faulted) {
+            break;
+        }
+
+        if (!maybeAdvanceDemoPose()) {
+            motion_faulted = true;
+            break;
+        }
+
+        if (interlock.state() == InterlockState::FAULT) {
+            motion_faulted = true;
+            std::cerr << "[DEMO] motion control fault: "
+                      << motion_controller_.lastErrorString() << std::endl;
+            break;
+        }
+    }
+
+    motion_controller_.shutdown();
+
+    if (!processed_any_frame) {
+        std::cerr << "[DEMO] no frames processed. Check camera availability."
+                  << std::endl;
+        return 1;
+    }
+
+    if (motion_faulted) {
+        return 1;
+    }
+
+    std::cerr << "[DEMO] frame stream ended." << std::endl;
     return 0;
 }
 

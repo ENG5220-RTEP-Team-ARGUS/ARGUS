@@ -10,17 +10,20 @@ void printUsage(const char* program_name) {
     std::cout
         << "Usage:\n"
         << "  " << program_name << "                Run Guardian FSM scenario demo\n"
+        << "  " << program_name << " --full-demo [options]\n"
         << "  " << program_name << " --motion-smoke-test [options]\n"
         << "  " << program_name << " --live-test [options]\n"
         << "\nOptions:\n"
+        << "  --full-demo               Run the full pipeline demo (camera + vision + guardian + interlock + motion)\n"
         << "  --motion-smoke-test       Run the motion-only servo smoke test (all joints by default)\n"
         << "  --base                    Smoke-test only the base servo\n"
         << "  --lower                   Smoke-test only the lower servo\n"
         << "  --upper                   Smoke-test only the upper servo\n"
         << "  --grip                    Smoke-test only the grip servo\n"
-        << "\nOptions for --live-test:\n"
+        << "\nOptions for --full-demo and --live-test:\n"
         << "  --camera-index <n>        Camera index (default: 0)\n"
         << "  --expected-marker-id <n>  Expected ArUco marker ID (default: 23)\n"
+        << "\nOptions for --live-test:\n"
         << "  --auto-ack                Auto-send operator acknowledge when frozen\n"
         << "  --help                    Show this message\n";
 }
@@ -64,6 +67,7 @@ bool parseIntArg(const char* text, int& value) {
 
 int main(int argc, char* argv[]) {
     bool run_live_test = false;
+    bool run_full_demo = false;
     bool run_motion_smoke_test = false;
     AppController::LiveTestOptions options;
     AppController::MotionSmokeTestOptions smoke_options;
@@ -79,6 +83,11 @@ int main(int argc, char* argv[]) {
 
         if (arg == "--live-test") {
             run_live_test = true;
+            continue;
+        }
+
+        if (arg == "--full-demo") {
+            run_full_demo = true;
             continue;
         }
 
@@ -127,8 +136,17 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    if (run_live_test && run_motion_smoke_test) {
-        std::cerr << "Choose exactly one mode: --live-test or --motion-smoke-test."
+    if ((run_live_test && run_full_demo) ||
+        (run_live_test && run_motion_smoke_test) ||
+        (run_full_demo && run_motion_smoke_test)) {
+        std::cerr << "Choose exactly one mode: --full-demo, --live-test, or --motion-smoke-test."
+                  << std::endl;
+        printUsage(argv[0]);
+        return 1;
+    }
+
+    if (run_full_demo && options.auto_ack) {
+        std::cerr << "--auto-ack is not supported in --full-demo mode."
                   << std::endl;
         printUsage(argv[0]);
         return 1;
@@ -137,6 +155,10 @@ int main(int argc, char* argv[]) {
     AppController app_controller;
     if (run_motion_smoke_test) {
         return app_controller.runMotionSmokeTest(smoke_options);
+    }
+
+    if (run_full_demo) {
+        return app_controller.runFullPipelineDemo(options);
     }
 
     if (run_live_test) {
