@@ -2,6 +2,7 @@
 
 #include "CameraCapture.hpp"
 #include "GuardianStateMachine.hpp"
+#include "PhysicalButtonModule.hpp"
 #include "RobotInterlock.hpp"
 #include "VisionProcessor.hpp"
 
@@ -238,7 +239,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         << "[LIVE_TEST] Expected marker ID: " << options.expected_marker_id << "\n"
         << "[LIVE_TEST] Auto operator ack: "
         << (options.auto_ack ? "ON" : "OFF") << "\n"
-        << "[LIVE_TEST] Controls: a=arm, d=disarm, q=quit\n"
+        << "[LIVE_TEST] Controls: a=arm, d=disarm, r=ack, q=quit\n"
         << "[LIVE_TEST] Starting in DISARMED setup mode\n"
         << "[LIVE_TEST] Guardian thresholds: freeze after "
         << kLiveFreezeBadFrameThreshold
@@ -273,6 +274,8 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
     bool guardian_armed = false;
     bool motion_faulted = false;
     FreezeReason pending_reason = FreezeReason::UNKNOWN_FAULT;
+    SafetyState current_vision_state = SafetyState::SAFE;
+    bool frame_is_safe = false;
 
     auto resetEnforcementState = [&]() {
         pending_reason = FreezeReason::UNKNOWN_FAULT;
@@ -296,6 +299,111 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
     };
 
     resetEnforcementState();
+
+    PhysicalButtonModule button_module;
+    std::cout << "[LIVE_TEST] Physical button module: "
+              << (button_module.available() ? "configured" : "disabled");
+    const char* button_module_status = button_module.lastErrorString();
+    if (button_module_status != nullptr &&
+        std::string(button_module_status) != "no error") {
+        std::cout << " (" << button_module_status << ")";
+    }
+    std::cout << std::endl;
+    if (!button_module.available()) {
+        std::cout << "[LIVE_TEST] Configure ARGUS_BUTTON_ARM_GPIO, "
+                     "ARGUS_BUTTON_DISARM_GPIO, and/or ARGUS_BUTTON_ACK_GPIO to "
+                     "enable physical operator buttons."
+                  << std::endl;
+    }
+
+    auto freezeMotionBeforeModeChange = [&](const char* action_label) -> bool {
+        interlock->onControlEvent(ControlEvent::FREEZE_NOW, FreezeReason::UNKNOWN_FAULT);
+        if (interlock->state() == InterlockState::FAULT) {
+            motion_faulted = true;
+            std::cerr << "[LIVE_TEST] Unable to freeze motion before " << action_label
+                      << ": " << motion_controller_.lastErrorString() << std::endl;
+            return false;
+        }
+
+        return true;
+    };
+
+    auto requestArm = [&]() -> bool {
+        if (guardian_armed) {
+            std::cout << "[LIVE_TEST] ARM request ignored: guardian already armed."
+                      << std::endl;
+            return true;
+        }
+
+        if (!frame_is_safe) {
+            std::cout << "[LIVE_TEST] ARM request rejected: current observed condition is "
+                         "unsafe (vision="
+                      << safetyStateToString(current_vision_state) << ")." << std::endl;
+            return true;
+        }
+
+        if (!freezeMotionBeforeModeChange("arming")) {
+            return false;
+        }
+
+        resetEnforcementState();
+        guardian_armed = true;
+        std::cout << "[LIVE_TEST] ARM accepted: guardian enforcement is now ACTIVE."
+                  << std::endl;
+        return true;
+    };
+
+    auto requestDisarm = [&]() -> bool {
+        if (!guardian_armed) {
+            std::cout << "[LIVE_TEST] DISARM request ignored: guardian already disarmed."
+                      << std::endl;
+            return true;
+        }
+
+        if (!freezeMotionBeforeModeChange("disarming")) {
+            return false;
+        }
+
+        guardian_armed = false;
+        resetEnforcementState();
+        std::cout << "[LIVE_TEST] DISARM accepted: guardian enforcement is now INACTIVE "
+                     "(setup/observation mode)."
+                  << std::endl;
+        return true;
+    };
+
+    auto requestAcknowledge = [&]() -> bool {
+        if (!guardian_armed) {
+            std::cout << "[LIVE_TEST] ACK request ignored: guardian is disarmed."
+                      << std::endl;
+            return true;
+        }
+
+        if (guardian->getState() != GuardianState::FROZEN_UNSAFE) {
+            std::cout << "[LIVE_TEST] ACK request ignored: guardian is not frozen."
+                      << std::endl;
+            return true;
+        }
+
+        guardian->operatorAcknowledge();
+        interlock->operatorAcknowledge();
+        std::cout << "[LIVE_TEST] Operator acknowledge requested." << std::endl;
+        return true;
+    };
+
+    auto requestFromButton = [&](PhysicalButtonEvent event) -> bool {
+        std::cout << "[BUTTON] " << PhysicalButtonModule::eventToString(event)
+                  << std::endl;
+        switch (event) {
+            case PhysicalButtonEvent::ARM_REQUEST:
+                return requestArm();
+            case PhysicalButtonEvent::DISARM_REQUEST:
+                return requestDisarm();
+            case PhysicalButtonEvent::ACK_REQUEST:
+                return requestAcknowledge();
+        }
+        return true;
+    };
 
     CameraCapture camera_capture(options.camera_index);
     cv::namedWindow(kLiveWindowName, cv::WINDOW_AUTOSIZE);
@@ -336,9 +444,10 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         const double focus_score = computeFocusScore(frame_event.image_data);
         const char* focus_quality = focusQualityLabel(focus_score);
 
-        const bool frame_is_safe = (result.state == SafetyState::SAFE);
+        current_vision_state = result.state;
+        frame_is_safe = (current_vision_state == SafetyState::SAFE);
         if (!frame_is_safe) {
-            pending_reason = mapSafetyToFreezeReason(result.state);
+            pending_reason = mapSafetyToFreezeReason(current_vision_state);
         }
 
         std::string guardian_state_text = "DISARMED_SETUP";
@@ -348,17 +457,29 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         if (guardian_armed) {
             guardian->processFrame(frame_is_safe ? FrameStatus::FRAME_GOOD
                                                  : FrameStatus::FRAME_BAD);
+        }
 
-            if (options.auto_ack &&
-                guardian->getState() == GuardianState::FROZEN_UNSAFE) {
-                guardian->operatorAcknowledge();
-                interlock->operatorAcknowledge();
-                std::cout << "[LIVE_TEST] Operator acknowledge sent automatically"
-                          << std::endl;
+        PhysicalButtonEvent button_event;
+        while (button_module.poll(button_event)) {
+            if (!requestFromButton(button_event)) {
+                break;
             }
+        }
 
+        if (motion_faulted) {
+            break;
+        }
+
+        if (guardian_armed && options.auto_ack &&
+            guardian->getState() == GuardianState::FROZEN_UNSAFE) {
+            guardian->operatorAcknowledge();
+            interlock->operatorAcknowledge();
+            std::cout << "[LIVE_TEST] Operator acknowledge sent automatically"
+                      << std::endl;
+        }
+
+        if (guardian_armed) {
             interlock->guardianHeartbeat(static_cast<std::uint32_t>(frame_index));
-
             guardian_state_text = guardian->getCurrentStateString();
             interlock_state_text = interlockStateToString(interlock->state());
             freeze_reason_text = freezeReasonToString(interlock->freezeReason());
@@ -367,7 +488,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         std::cout << "[LIVE_TEST] frame=" << frame_index
                   << " armed=" << (guardian_armed ? "YES" : "NO")
                   << " can_arm=" << (frame_is_safe ? "YES" : "NO")
-                  << " vision=" << safetyStateToString(result.state)
+                  << " vision=" << safetyStateToString(current_vision_state)
                   << " focus_score=" << formatFocusScore(focus_score)
                   << " focus=" << focus_quality
                   << " guardian=" << guardian_state_text
@@ -387,16 +508,17 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
 
         cv::Mat display_frame = frame_event.image_data.clone();
         const bool decision_is_safe = guardian_armed
-                                          ? ((result.state == SafetyState::SAFE) &&
+                                          ? ((current_vision_state == SafetyState::SAFE) &&
                                              (guardian->getState() ==
                                               GuardianState::SAFE_MONITORING) &&
                                              interlock->motionAllowed())
-                                          : (result.state == SafetyState::SAFE);
+                                          : (current_vision_state == SafetyState::SAFE);
         const cv::Scalar decision_color =
             decision_is_safe ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 0, 255);
 
         cv::putText(display_frame,
-                    std::string("VISION: ") + safetyStateToString(result.state),
+                    std::string("VISION: ") +
+                        safetyStateToString(current_vision_state),
                     cv::Point(16, 30),
                     cv::FONT_HERSHEY_SIMPLEX,
                     0.7,
@@ -421,7 +543,8 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
 
         cv::putText(display_frame,
                     std::string("CONTROL: ") +
-                        (guardian_armed ? "ARMED (d=disarm)" : "DISARMED (a=arm)") +
+                        (guardian_armed ? "ARMED (d=disarm, r=ack)"
+                                        : "DISARMED (a=arm, r=ack)") +
                         " | CAN_ARM: " + (frame_is_safe ? "YES" : "NO"),
                     cv::Point(16, 120),
                     cv::FONT_HERSHEY_SIMPLEX,
@@ -475,52 +598,21 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
             break;
         }
 
-        if (key == 'a' || key == 'A') {
-            if (guardian_armed) {
-                std::cout << "[LIVE_TEST] ARM request ignored: guardian already armed."
-                          << std::endl;
-            } else if (!frame_is_safe) {
-                std::cout << "[LIVE_TEST] ARM request rejected: current observed condition is "
-                             "unsafe (vision="
-                          << safetyStateToString(result.state) << ")." << std::endl;
-            } else {
-                interlock->onControlEvent(
-                    ControlEvent::FREEZE_NOW,
-                    FreezeReason::UNKNOWN_FAULT);
-                if (interlock->state() == InterlockState::FAULT) {
-                    motion_faulted = true;
-                    std::cerr << "[LIVE_TEST] Unable to freeze motion before arming: "
-                              << motion_controller_.lastErrorString() << std::endl;
-                    break;
-                }
+        if (key == 'r' || key == 'R') {
+            if (!requestAcknowledge()) {
+                break;
+            }
+        }
 
-                resetEnforcementState();
-                guardian_armed = true;
-                std::cout << "[LIVE_TEST] ARM accepted: guardian enforcement is now ACTIVE."
-                          << std::endl;
+        if (key == 'a' || key == 'A') {
+            if (!requestArm()) {
+                break;
             }
         }
 
         if (key == 'd' || key == 'D') {
-            if (!guardian_armed) {
-                std::cout << "[LIVE_TEST] DISARM request ignored: guardian already disarmed."
-                          << std::endl;
-            } else {
-                interlock->onControlEvent(
-                    ControlEvent::FREEZE_NOW,
-                    FreezeReason::UNKNOWN_FAULT);
-                if (interlock->state() == InterlockState::FAULT) {
-                    motion_faulted = true;
-                    std::cerr << "[LIVE_TEST] Unable to freeze motion before disarming: "
-                              << motion_controller_.lastErrorString() << std::endl;
-                    break;
-                }
-
-                guardian_armed = false;
-                resetEnforcementState();
-                std::cout << "[LIVE_TEST] DISARM accepted: guardian enforcement is now INACTIVE "
-                             "(setup/observation mode)."
-                          << std::endl;
+            if (!requestDisarm()) {
+                break;
             }
         }
 

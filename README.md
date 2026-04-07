@@ -69,10 +69,37 @@ Options:
 When `--live-test` is running:
 - `a`: arm guardian enforcement (only allowed if current reading is safe)
 - `d`: disarm and return to setup/observation mode
+- `r`: acknowledge a frozen state and let the guardian resume through its normal recovery path
 - `q`: quit
 - `Ctrl+C`: terminal stop fallback
 
 System starts in `DISARMED` setup mode by default.
+
+## Physical button module
+The live controller can also poll optional GPIO-backed operator buttons. The module is
+semantic, not direct-control: it emits requests that AppController routes through the
+existing guardian/interlock flow.
+
+Event contract:
+- `ARM_REQUEST`: request to enter armed enforcement mode. AppController still freezes
+  motion through `RobotInterlock` before arming.
+- `DISARM_REQUEST`: request to leave armed enforcement mode. AppController still freezes
+  motion through `RobotInterlock` before disarming.
+- `ACK_REQUEST`: request to acknowledge a frozen state. AppController still calls the
+  guardian/interlock acknowledgement path and waits for the normal reset/recovery logic.
+
+GPIO configuration is optional. If none of the pins below are set, the module stays
+disabled and the keyboard controls remain available.
+
+Environment variables:
+- `ARGUS_BUTTON_ARM_GPIO`
+- `ARGUS_BUTTON_DISARM_GPIO`
+- `ARGUS_BUTTON_ACK_GPIO`
+- `ARGUS_BUTTON_ACTIVE_LOW` (`1` by default)
+- `ARGUS_BUTTON_DEBOUNCE_MS` (`50` by default)
+
+The module reads GPIO `value` files under `/sys/class/gpio/gpio<N>/value` and only emits
+debounced press events.
 
 In live mode, guardian thresholds are:
 - freeze after `30` consecutive bad frames (~1 second at ~30 FPS, to avoid freezing on brief blur/noise spikes)
@@ -85,8 +112,9 @@ In live mode, guardian thresholds are:
 4. Watch overlay/terminal until current reading is safe (`CAN_ARM: YES`).
 5. Press `a` to arm enforcement (`a` is rejected while `CAN_ARM: NO`).
 6. Move marker out/invalid to verify unsafe/frozen transitions.
-7. Press `d` to return to setup mode as needed.
-8. Press `q` to exit.
+7. Press `r` or the physical ACK button to acknowledge a freeze once the scene is safe again.
+8. Press `d` to return to setup mode as needed.
+9. Press `q` to exit.
 
 ## What you should see
 ### In terminal (per frame)

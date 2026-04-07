@@ -14,6 +14,7 @@ add_executable(ARGUS
     src/CameraCapture.cpp
     src/MotionController.cpp
     src/RobotInterlock.cpp
+    src/PhysicalButtonModule.cpp
 )
 
 target_include_directories(ARGUS PRIVATE
