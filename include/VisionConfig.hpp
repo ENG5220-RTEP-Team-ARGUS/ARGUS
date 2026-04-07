@@ -1,70 +1,127 @@
+/**
+ * @file VisionConfig.hpp
+ * @brief Configuration parameters for the VisionProcessor.
+ *
+ * This struct holds all tunable parameters that control how the
+ * VisionProcessor evaluates safety. By separating configuration from
+ * algorithm logic, the VisionProcessor remains deterministic and testable,
+ * and different configurations can be applied without touching any
+ * processing code - satisfying the Open/Closed Principle.
+ *
+ * @note In production, these values should be loaded from
+ *       config/vision_config.yaml at startup rather than relying on
+ *       the defaults defined here.
+ */
+
 #pragma once
 
-/*
- VisionConfig.hpp
- Configuration parameters for the VisionProcessor.
- 
- This struct holds all tunable parameters that control how the
- VisionProcessor evaluates safety. By separating configuration
- from algorithm logic, the VisionProcessor remains deterministic
- and testable and different configs can be used without touching
- any processing code.
- 
- In production, these values would be loaded from config/vision_config.yaml
- at startup rather than relying on the defaults defined here.
-*/
+#include <opencv2/objdetect/aruco_detector.hpp>
 
-//  VisionConfig
-//  Implemented into VisionProcessor at construction time.
-//  All safety thresholds and zone boundaries are defined here.
-
+/**
+ * @brief All tunable safety thresholds and zone boundaries for VisionProcessor.
+ *
+ * Injected into VisionProcessor at construction time via the constructor
+ * parameter. Stored by value inside VisionProcessor so external changes
+ * after construction cannot affect in-flight safety decisions.
+ *
+ * @par Usage
+ * @code
+ * VisionConfig config;
+ * config.expectedMarkerId = 42;
+ * config.maxSpeed = 150.0f;
+ * VisionProcessor vp(config);
+ * @endcode
+ */
 struct VisionConfig {
 
-    //  Marker identification
+    // Marker Identification 
 
-    // The ArUco marker ID that the system expects to see.
-    // Any detected marker with a different ID will be treated
-    // as TOOL_NOT_DETECTED to prevent spoofing by foreign markers.
+    /**
+     * @brief The ArUco marker ID the system expects to detect.
+     *
+     * Any detected marker with a different ID is treated as
+     * TOOL_NOT_DETECTED to prevent spoofing by foreign markers in the scene.
+     * Default: 23.
+     */
     int expectedMarkerId = 23;
 
-    //  Speed threshold
+    // Speed Threshold 
 
-    // Max permitted centroid displacement in pixels/second.
-    // Exceeding this triggers SafetyState::EXCESSIVE_SPEED.
-    // Calibrate against the robot's max safe speed projected into image space.
+    /**
+     * @brief Maximum permitted marker centroid displacement in pixels/second.
+     *
+     * Exceeding this threshold triggers SafetyState::EXCESSIVE_SPEED.
+     * Calibrate against the robot's maximum safe operational speed
+     * projected into image space at the working distance.
+     * Default: 200.0 px/s.
+     */
     float maxSpeed = 200.0f;
 
-    //  Safe zone (pixels, in full camera frame coordinates)
-    //  Defines a rectangular region within which the marker
-    //  centroid must remain for the system to report SAFE.
-    //  Violation triggers SafetyState::OUTSIDE_ALLOWED_ZONE.
+    // Safe Zone (pixels, full camera frame coordinates) 
+    //
+    // Defines a rectangular region within which the marker centroid must
+    // remain for the system to report SAFE. Any centroid outside this
+    // rectangle triggers SafetyState::OUTSIDE_ALLOWED_ZONE.
 
-    // Left boundary of the safe zone (pixels).
+    /**
+     * @brief Left boundary of the safe zone in pixels.
+     *
+     * Centroid x must be >= safeZoneXMin. Default: 100.
+     */
     int safeZoneXMin = 100;
 
-    // Right boundary of the safe zone (pixels).
+    /**
+     * @brief Right boundary of the safe zone in pixels.
+     *
+     * Centroid x must be <= safeZoneXMax. Default: 500.
+     */
     int safeZoneXMax = 500;
 
-    // Top boundary of the safe zone (pixels).
+    /**
+     * @brief Top boundary of the safe zone in pixels.
+     *
+     * Centroid y must be >= safeZoneYMin. Default: 100.
+     */
     int safeZoneYMin = 100;
 
-    // Bottom boundary of the safe zone (pixels).
+    /**
+     * @brief Bottom boundary of the safe zone in pixels.
+     *
+     * Centroid y must be <= safeZoneYMax. Default: 400.
+     */
     int safeZoneYMax = 400;
 
+    // Orientation Limits (degrees, image plane)
+    //
+    // Defines the permitted angular range of the marker in the image plane.
+    // Angles are computed from the marker corner positions using atan2.
+    // Any angle outside [orientationMin, orientationMax] triggers
+    // SafetyState::INVALID_ORIENTATION.
 
-    //  Orientation limits (degrees, in image plane)
-    //  Defines the permitted angular range of the marker.
-    //  Angles are computed from the marker corner positions
-    //  and represent rotation in the image plane.
-    //  Violation triggers SafetyState::INVALID_ORIENTATION.
-
-    // Minimum permitted marker orientation angle in degrees.
+    /**
+     * @brief Minimum permitted marker orientation angle in degrees.
+     *
+     * Computed from corner[0] to corner[1] using atan2.
+     * Default: -45.0 degrees.
+     */
     float orientationMin = -45.0f;
 
-    // Maximum permitted marker orientation angle in degrees.
-    float orientationMax =  45.0f;
+    /**
+     * @brief Maximum permitted marker orientation angle in degrees.
+     *
+     * Computed from corner[0] to corner[1] using atan2.
+     * Default: 45.0 degrees.
+     */
+    float orientationMax = 45.0f;
 
-    // ArUco dictionary used for marker detection.
-    // DICT_6X6_250 by default — change here without touching VisionProcessor.
+    // ArUco Dictionary
+
+    /**
+     * @brief ArUco dictionary used for marker detection.
+     *
+     * DICT_6X6_250 by default - provides high inter-marker Hamming distance,
+     * reducing false positives in safety-critical contexts.
+     * Change here to switch dictionary without modifying VisionProcessor.
+     */
     int dictionaryId = cv::aruco::DICT_6X6_250;
 };
