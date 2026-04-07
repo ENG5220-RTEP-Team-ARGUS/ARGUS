@@ -74,19 +74,7 @@ CameraCapture::CameraCapture(int camera_index) {
         }
         if (!opened) {
             opened = tryOpen(cap, "default backend index " + std::to_string(camera_index), [&]() {
-                if (!cap.open(camera_index)) {
-                    return false;
-                }
-
-                if (cap.getBackendName() == "GSTREAMER") {
-                    std::cerr << "[CameraCapture] Default backend resolved to GSTREAMER under "
-                                 "libcamerify; rejecting and continuing with V4L2-only policy."
-                              << std::endl;
-                    cap.release();
-                    return false;
-                }
-
-                return true;
+                return cap.open(camera_index);
             });
         }
     } else {
@@ -100,7 +88,7 @@ CameraCapture::CameraCapture(int camera_index) {
         }
     }
 
-    if (!opened && !libcamerify_active) {
+    if (!opened) {
         const std::vector<std::string> pipelines = buildLibcameraPipelines();
         for (std::size_t index = 0; index < pipelines.size() && !opened; ++index) {
             const std::string label =

@@ -155,6 +155,9 @@ libcamerify ./build/ARGUS --full-demo --camera-index 0 --expected-marker-id 23
 Convenience wrapper:
 - `scripts/full_demo.sh`
 
+The wrapper self-elevates with `sudo` if needed because the current physical ACK
+button backend writes to `/sys/class/gpio`.
+
 What it does:
 - waits for a safe camera view
 - stages `HOME`
