@@ -66,19 +66,19 @@ Options:
 - `--help`: print usage
 
 ### 3) Motion smoke test (hardware in the loop)
-Runs a short, conservative arm motion sequence through the existing safety path:
-
-`AppController -> GuardianStateMachine -> RobotInterlock -> MotionController`
+Runs a motion-only servo sweep through the existing `AppController -> MotionController`
+path.
 
 ```bash
 ./build/ARGUS --motion-smoke-test
 ```
 
-This mode does not use the camera pipeline. It is meant to confirm:
+This mode does not use the camera pipeline, guardian freeze path, or button input.
+It is meant to confirm:
 - PCA9685 I2C output is working
 - the MeArm channel mapping is correct
-- `RobotInterlock` freezes and re-enables motion correctly
-- actuation still depends on guardian/interlock state
+- each servo can move cleanly on its own
+- the arm returns to home after each sweep
 
 The smoke test uses zero-centered logical joint offsets and initial sweep windows:
 - base: `[-90, +90]`
@@ -93,13 +93,23 @@ Validated hardware mapping:
 - grip -> channel `3` -> MeArm `CLAW`
 
 Sequence:
-1. Move to home pose and do one freeze/recover check there
+1. Move to home pose
 2. For `base`, move `0 -> -90 -> +90 -> 0`
 3. For `lower`, move `0 -> -90 -> +90 -> 0`
 4. For `upper`, move `0 -> -90 -> +90 -> 0`
 5. For `grip`, move `0 -> -90 -> +90 -> 0`
 
 Every step is held for about 3 seconds.
+
+What you should see:
+- `base` yaw left/right while `lower`, `upper`, and `grip` stay at home
+- `lower` raises/lowers while the other three stay at home
+- `upper` bends/extends while the other three stay at home
+- `grip` opens/closes while the other three stay at home
+- each joint should return to the neutral `0` position before the next joint starts
+
+If a joint moves the wrong way, binds, or hits a hard stop, stop the test and
+shrink the step constants in `src/AppController.cpp` before trying again.
 
 Every command is clamped in software before it reaches the motion controller. If the
 sequence needs to be tightened further for a mechanically sensitive build, reduce the

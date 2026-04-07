@@ -358,6 +358,157 @@ int AppController::runGuardianScenarioDemo() {
 }
 
 int AppController::runMotionSmokeTest() {
+    {
+        std::cout
+            << "[SMOKE_TEST] Starting motion-only servo smoke test\n"
+            << "[SMOKE_TEST] Purpose: verify PCA9685 output and servo mapping only\n"
+            << "[SMOKE_TEST] No guardian freeze, no recovery cycle, no camera input\n"
+            << "[SMOKE_TEST] Logical home for all joints: base=0 lower=0 upper=0 grip=0\n"
+            << "[SMOKE_TEST] Each step is held for 3 seconds\n"
+            << "[SMOKE_TEST] Per-joint sweep: 0 -> -90 -> +90 -> 0\n";
+
+        for (const SmokeJointSpec& spec : kSmokeJointSpecs) {
+            std::cout << "[SMOKE_TEST]   " << spec.logical_name
+                      << " -> channel " << static_cast<int>(spec.channel)
+                      << " -> " << spec.mearm_name
+                      << " clamp window [" << spec.min_offset << ", "
+                      << spec.max_offset << "]"
+                      << std::endl;
+        }
+
+        MotionChannelMap channel_map{};
+        channel_map.base = 0;
+        channel_map.lower = 1;
+        channel_map.upper = 2;
+        channel_map.gripper = 3;
+
+        if (!motion_controller_.initialise(kDefaultI2cDevicePath,
+                                           kDefaultPca9685Address,
+                                           kDefaultPwmFrequencyHz,
+                                           channel_map)) {
+            std::cerr << "[SMOKE_TEST] Motion controller initialization failed: "
+                      << motion_controller_.lastErrorString() << std::endl;
+            return 1;
+        }
+
+        auto fail = [&](const std::string& message) {
+            std::cerr << "[SMOKE_TEST] " << message << std::endl;
+            motion_controller_.shutdown();
+            return 1;
+        };
+
+        auto logStatus = [&](const std::string& phase) {
+            std::cout << "[SMOKE_TEST] phase=" << phase
+                      << " motion_ctrl="
+                      << motionControllerStateToString(motion_controller_.outputState())
+                      << " enabled=" << (motion_controller_.isEnabled() ? "YES" : "NO")
+                      << " frozen=" << (motion_controller_.isFrozen() ? "YES" : "NO")
+                      << std::endl;
+        };
+
+        auto makeJointOffsets = [](int joint_index, int joint_offset) {
+            SmokeJointOffsets offsets{};
+            switch (joint_index) {
+                case 0:
+                    offsets.base = joint_offset;
+                    break;
+                case 1:
+                    offsets.lower = joint_offset;
+                    break;
+                case 2:
+                    offsets.upper = joint_offset;
+                    break;
+                case 3:
+                    offsets.grip = joint_offset;
+                    break;
+                default:
+                    break;
+            }
+            return offsets;
+        };
+
+        auto stagePose = [&](const std::string& label,
+                             const SmokeJointOffsets& requested) {
+            bool clamped = false;
+            const SmokeJointOffsets bounded = clampSmokeOffsets(requested, clamped);
+            const MeArmJointTargets targets = makeSmokeTargets(bounded, clamped);
+
+            if (clamped) {
+                std::cout << "[SMOKE_TEST] " << label << " requested "
+                          << formatOffsets(requested) << " clamped to "
+                          << formatOffsets(bounded) << std::endl;
+            }
+
+            if (!motion_controller_.setTargets(targets)) {
+                return fail(std::string("failed to stage pose ") + label + ": " +
+                            motion_controller_.lastErrorString());
+            }
+
+            std::cout << "[SMOKE_TEST] " << label << " -> offsets "
+                      << formatOffsets(bounded) << " targets "
+                      << formatTargets(targets) << std::endl;
+            logStatus(label);
+            std::this_thread::sleep_for(kSmokeStepDwell);
+            return 0;
+        };
+
+        bool home_clamped = false;
+        const MeArmJointTargets home_targets =
+            makeSmokeTargets(kSmokeHomePose, home_clamped);
+
+        if (!motion_controller_.setTargets(home_targets)) {
+            return fail(std::string("failed to stage home pose: ") +
+                        motion_controller_.lastErrorString());
+        }
+
+        if (!motion_controller_.enable()) {
+            return fail(std::string("failed to enable motion: ") +
+                        motion_controller_.lastErrorString());
+        }
+
+        logStatus("home");
+        std::this_thread::sleep_for(kSmokeStepDwell);
+
+        auto runJointSweep = [&](std::size_t index) {
+            const SmokeJointSpec& spec = kSmokeJointSpecs[index];
+            std::cout << "[SMOKE_TEST] joint=" << spec.logical_name
+                      << " servo=" << spec.mearm_name
+                      << " sweep=0->-90->+90->0" << std::endl;
+
+            const std::string home_label = std::string(spec.logical_name) + " home";
+            const std::string neg_label = std::string(spec.logical_name) + " -90";
+            const std::string pos_label = std::string(spec.logical_name) + " +90";
+
+            if (stagePose(home_label, makeJointOffsets(static_cast<int>(index), 0)) != 0) {
+                return 1;
+            }
+            if (stagePose(neg_label,
+                          makeJointOffsets(static_cast<int>(index), kSmokeNegativeStep)) != 0) {
+                return 1;
+            }
+            if (stagePose(pos_label,
+                          makeJointOffsets(static_cast<int>(index), kSmokePositiveStep)) != 0) {
+                return 1;
+            }
+            if (stagePose(home_label, makeJointOffsets(static_cast<int>(index), 0)) != 0) {
+                return 1;
+            }
+
+            return 0;
+        };
+
+        for (std::size_t index = 0; index < kSmokeJointSpecs.size(); ++index) {
+            if (runJointSweep(index) != 0) {
+                motion_controller_.shutdown();
+                return 1;
+            }
+        }
+
+        motion_controller_.shutdown();
+        std::cout << "[SMOKE_TEST] Motion-only smoke test complete." << std::endl;
+        return 0;
+    }
+
     std::cout
         << "[SMOKE_TEST] Starting motion smoke test mode\n"
         << "[SMOKE_TEST] Hardware path: AppController -> GuardianStateMachine -> "

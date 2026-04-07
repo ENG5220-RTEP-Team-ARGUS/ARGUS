@@ -13,7 +13,7 @@ void printUsage(const char* program_name) {
         << "  " << program_name << " --motion-smoke-test\n"
         << "  " << program_name << " --live-test [options]\n"
         << "\nOptions:\n"
-        << "  --motion-smoke-test       Run the hardware-in-the-loop motion smoke test\n"
+        << "  --motion-smoke-test       Run the motion-only servo smoke test\n"
         << "\nOptions for --live-test:\n"
         << "  --camera-index <n>        Camera index (default: 0)\n"
         << "  --expected-marker-id <n>  Expected ArUco marker ID (default: 23)\n"
