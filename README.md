@@ -80,11 +80,11 @@ This mode does not use the camera pipeline. It is meant to confirm:
 - `RobotInterlock` freezes and re-enables motion correctly
 - actuation still depends on guardian/interlock state
 
-The smoke test uses zero-centered logical joint offsets and conservative clamp windows:
-- base: `[-20, +20]`
-- lower: `[-15, +15]`
-- upper: `[-15, +15]`
-- grip: `[-15, +15]`
+The smoke test uses zero-centered logical joint offsets and initial sweep windows:
+- base: `[-90, +90]`
+- lower: `[-90, +90]`
+- upper: `[-90, +90]`
+- grip: `[-90, +90]`
 
 Validated hardware mapping:
 - base -> channel `0` -> MeArm `BASE`
@@ -93,17 +93,13 @@ Validated hardware mapping:
 - grip -> channel `3` -> MeArm `CLAW`
 
 Sequence:
-1. Move to home pose
-2. Freeze/recover once while staging `base +15`
-3. Return to home
-4. Sweep `base -15` and back home
-5. Sweep `lower +10` and back home
-6. Sweep `lower -10` and back home
-7. Sweep `upper +10` and back home
-8. Sweep `upper -10` and back home
-9. Sweep `grip +10` and back home
-10. Sweep `grip -10` and back home
-11. Return to home
+1. Move to home pose and do one freeze/recover check there
+2. For `base`, move `0 -> -90 -> +90 -> 0`
+3. For `lower`, move `0 -> -90 -> +90 -> 0`
+4. For `upper`, move `0 -> -90 -> +90 -> 0`
+5. For `grip`, move `0 -> -90 -> +90 -> 0`
+
+Every step is held for about 3 seconds.
 
 Every command is clamped in software before it reaches the motion controller. If the
 sequence needs to be tightened further for a mechanically sensitive build, reduce the

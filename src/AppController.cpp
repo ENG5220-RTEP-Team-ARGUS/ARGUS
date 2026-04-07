@@ -27,21 +27,19 @@ constexpr int kLiveFreezeBadFrameThreshold = 30;
 constexpr int kLiveRecoverGoodFrameThreshold = 3;
 constexpr int kSmokeFreezeBadFrameThreshold = 1;
 constexpr int kSmokeRecoverGoodFrameThreshold = 1;
-constexpr std::chrono::milliseconds kSmokeStepDwell{800};
+constexpr std::chrono::milliseconds kSmokeStepDwell{3000};
 constexpr std::chrono::milliseconds kSmokeTransitionPause{200};
 constexpr std::uint16_t kSmokeNeutralPulseTicks = 300;
-constexpr int kSmokeBaseMinOffset = -20;
-constexpr int kSmokeBaseMaxOffset = 20;
-constexpr int kSmokeLowerMinOffset = -15;
-constexpr int kSmokeLowerMaxOffset = 15;
-constexpr int kSmokeUpperMinOffset = -15;
-constexpr int kSmokeUpperMaxOffset = 15;
-constexpr int kSmokeGripMinOffset = -15;
-constexpr int kSmokeGripMaxOffset = 15;
-constexpr int kSmokeBasePositiveStep = 15;
-constexpr int kSmokeBaseNegativeStep = -15;
-constexpr int kSmokeOtherPositiveStep = 10;
-constexpr int kSmokeOtherNegativeStep = -10;
+constexpr int kSmokeBaseMinOffset = -90;
+constexpr int kSmokeBaseMaxOffset = 90;
+constexpr int kSmokeLowerMinOffset = -90;
+constexpr int kSmokeLowerMaxOffset = 90;
+constexpr int kSmokeUpperMinOffset = -90;
+constexpr int kSmokeUpperMaxOffset = 90;
+constexpr int kSmokeGripMinOffset = -90;
+constexpr int kSmokeGripMaxOffset = 90;
+constexpr int kSmokePositiveStep = 90;
+constexpr int kSmokeNegativeStep = -90;
 
 class MotionControllerHardwareAdapter final : public RobotHardware {
 public:
@@ -216,14 +214,14 @@ constexpr std::array<SmokeJointSpec, MotionController::kServoCount> kSmokeJointS
 }};
 
 constexpr SmokeJointOffsets kSmokeHomePose{0, 0, 0, 0};
-constexpr SmokeJointOffsets kSmokeBasePositivePose{kSmokeBasePositiveStep, 0, 0, 0};
-constexpr SmokeJointOffsets kSmokeBaseNegativePose{kSmokeBaseNegativeStep, 0, 0, 0};
-constexpr SmokeJointOffsets kSmokeLowerPositivePose{0, kSmokeOtherPositiveStep, 0, 0};
-constexpr SmokeJointOffsets kSmokeLowerNegativePose{0, kSmokeOtherNegativeStep, 0, 0};
-constexpr SmokeJointOffsets kSmokeUpperPositivePose{0, 0, kSmokeOtherPositiveStep, 0};
-constexpr SmokeJointOffsets kSmokeUpperNegativePose{0, 0, kSmokeOtherNegativeStep, 0};
-constexpr SmokeJointOffsets kSmokeGripPositivePose{0, 0, 0, kSmokeOtherPositiveStep};
-constexpr SmokeJointOffsets kSmokeGripNegativePose{0, 0, 0, kSmokeOtherNegativeStep};
+constexpr SmokeJointOffsets kSmokeBasePositivePose{kSmokePositiveStep, 0, 0, 0};
+constexpr SmokeJointOffsets kSmokeBaseNegativePose{kSmokeNegativeStep, 0, 0, 0};
+constexpr SmokeJointOffsets kSmokeLowerPositivePose{0, kSmokePositiveStep, 0, 0};
+constexpr SmokeJointOffsets kSmokeLowerNegativePose{0, kSmokeNegativeStep, 0, 0};
+constexpr SmokeJointOffsets kSmokeUpperPositivePose{0, 0, kSmokePositiveStep, 0};
+constexpr SmokeJointOffsets kSmokeUpperNegativePose{0, 0, kSmokeNegativeStep, 0};
+constexpr SmokeJointOffsets kSmokeGripPositivePose{0, 0, 0, kSmokePositiveStep};
+constexpr SmokeJointOffsets kSmokeGripNegativePose{0, 0, 0, kSmokeNegativeStep};
 
 int clampOffsetValue(int value, int min_value, int max_value, bool& clamped) {
     const int bounded = std::clamp(value, min_value, max_value);
@@ -372,7 +370,7 @@ int AppController::runMotionSmokeTest() {
         << " bad frame, recover after "
         << kSmokeRecoverGoodFrameThreshold
         << " good frame\n"
-        << "[SMOKE_TEST] Conservative joint limits and hardware mapping:\n";
+        << "[SMOKE_TEST] Initial per-joint sweep limits:\n";
 
     for (const SmokeJointSpec& spec : kSmokeJointSpecs) {
         std::cout << "[SMOKE_TEST]   " << spec.logical_name
@@ -384,11 +382,12 @@ int AppController::runMotionSmokeTest() {
     }
 
     std::cout
-        << "[SMOKE_TEST] Sequence: HOME -> BASE +15 (freeze/recover) -> HOME -> "
-           "BASE -15 -> HOME -> LOWER +10 -> HOME -> LOWER -10 -> HOME -> "
-           "UPPER +10 -> HOME -> UPPER -10 -> HOME -> GRIP +10 -> HOME -> "
-           "GRIP -10 -> HOME\n"
-        << "[SMOKE_TEST] Every command is clamped to the offset windows above.\n";
+        << "[SMOKE_TEST] Sequence: HOME (freeze/recover) -> BASE 0 -> BASE -90 -> "
+           "BASE +90 -> BASE 0 -> LOWER 0 -> LOWER -90 -> LOWER +90 -> LOWER 0 -> "
+           "UPPER 0 -> UPPER -90 -> UPPER +90 -> UPPER 0 -> GRIP 0 -> GRIP -90 -> "
+           "GRIP +90 -> GRIP 0\n"
+        << "[SMOKE_TEST] Every command is clamped to the offset windows above and "
+           "held for 3 seconds.\n";
 
     MotionChannelMap channel_map{};
     channel_map.base = 0;
@@ -523,23 +522,23 @@ int AppController::runMotionSmokeTest() {
     logStatus("startup");
 
     const std::array<SmokePose, 17> smoke_sequence = {{
-        {"HOME", kSmokeHomePose, false},
-        {"BASE +15", kSmokeBasePositivePose, true},
-        {"HOME", kSmokeHomePose, false},
-        {"BASE -15", kSmokeBaseNegativePose, false},
-        {"HOME", kSmokeHomePose, false},
-        {"LOWER +10", kSmokeLowerPositivePose, false},
-        {"HOME", kSmokeHomePose, false},
-        {"LOWER -10", kSmokeLowerNegativePose, false},
-        {"HOME", kSmokeHomePose, false},
-        {"UPPER +10", kSmokeUpperPositivePose, false},
-        {"HOME", kSmokeHomePose, false},
-        {"UPPER -10", kSmokeUpperNegativePose, false},
-        {"HOME", kSmokeHomePose, false},
-        {"GRIP +10", kSmokeGripPositivePose, false},
-        {"HOME", kSmokeHomePose, false},
-        {"GRIP -10", kSmokeGripNegativePose, false},
-        {"HOME", kSmokeHomePose, false},
+        {"HOME", kSmokeHomePose, true},
+        {"BASE 0", kSmokeHomePose, false},
+        {"BASE -90", kSmokeBaseNegativePose, false},
+        {"BASE +90", kSmokeBasePositivePose, false},
+        {"BASE 0", kSmokeHomePose, false},
+        {"LOWER 0", kSmokeHomePose, false},
+        {"LOWER -90", kSmokeLowerNegativePose, false},
+        {"LOWER +90", kSmokeLowerPositivePose, false},
+        {"LOWER 0", kSmokeHomePose, false},
+        {"UPPER 0", kSmokeHomePose, false},
+        {"UPPER -90", kSmokeUpperNegativePose, false},
+        {"UPPER +90", kSmokeUpperPositivePose, false},
+        {"UPPER 0", kSmokeHomePose, false},
+        {"GRIP 0", kSmokeHomePose, false},
+        {"GRIP -90", kSmokeGripNegativePose, false},
+        {"GRIP +90", kSmokeGripPositivePose, false},
+        {"GRIP 0", kSmokeHomePose, false},
     }};
 
     for (const SmokePose& pose : smoke_sequence) {
