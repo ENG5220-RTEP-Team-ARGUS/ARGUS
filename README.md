@@ -110,9 +110,13 @@ The smoke test uses zero-centered logical joint offsets and initial sweep window
 
 Validated hardware mapping:
 - base -> channel `0` -> MeArm `BASE`
-- lower -> channel `1` -> MeArm `RIGHT`
-- upper -> channel `2` -> MeArm `LEFT`
-- grip -> channel `3` -> MeArm `CLAW`
+- lower -> channel `4` -> MeArm `LEFT`
+- upper -> channel `8` -> MeArm `RIGHT`
+- grip -> channel `12` -> MeArm `CLAW`
+
+Rear-view physical layout:
+- lower servo is on the left side
+- upper servo is on the right side
 
 What you should see:
 - `base` yaw left/right while `lower`, `upper`, and `grip` stay at home

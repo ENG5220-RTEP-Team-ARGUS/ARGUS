@@ -23,6 +23,10 @@ constexpr const char* kLiveWindowName = "ARGUS Live Test";
 constexpr const char* kDefaultI2cDevicePath = "/dev/i2c-1";
 constexpr std::uint8_t kDefaultPca9685Address = 0x40;
 constexpr float kDefaultPwmFrequencyHz = 50.0f;
+constexpr std::uint8_t kBaseServoChannel = 0;
+constexpr std::uint8_t kLowerServoChannel = 4;
+constexpr std::uint8_t kUpperServoChannel = 8;
+constexpr std::uint8_t kGripServoChannel = 12;
 constexpr int kLiveFreezeBadFrameThreshold = 30;
 constexpr int kLiveRecoverGoodFrameThreshold = 3;
 constexpr std::chrono::milliseconds kSmokeStepDwell{3000};
@@ -204,10 +208,10 @@ struct SmokeJointRunPlan {
 };
 
 constexpr std::array<SmokeJointSpec, MotionController::kServoCount> kSmokeJointSpecs = {{
-    {"base", "MeArm BASE", "yaw left/right", 0, kSmokeBaseMinOffset, kSmokeBaseMaxOffset},
-    {"lower", "MeArm RIGHT", "raise/lower", 1, kSmokeLowerMinOffset, kSmokeLowerMaxOffset},
-    {"upper", "MeArm LEFT", "bend/extend", 2, kSmokeUpperMinOffset, kSmokeUpperMaxOffset},
-    {"grip", "MeArm CLAW", "open/close", 3, kSmokeGripMinOffset, kSmokeGripMaxOffset},
+    {"base", "MeArm BASE", "yaw left/right", kBaseServoChannel, kSmokeBaseMinOffset, kSmokeBaseMaxOffset},
+    {"lower", "MeArm LEFT", "raise/lower", kLowerServoChannel, kSmokeLowerMinOffset, kSmokeLowerMaxOffset},
+    {"upper", "MeArm RIGHT", "bend/extend", kUpperServoChannel, kSmokeUpperMinOffset, kSmokeUpperMaxOffset},
+    {"grip", "MeArm CLAW", "open/close", kGripServoChannel, kSmokeGripMinOffset, kSmokeGripMaxOffset},
 }};
 
 constexpr SmokeJointOffsets kSmokeHomePose{0, 0, 0, 0};
@@ -403,10 +407,10 @@ int AppController::runMotionSmokeTest(const MotionSmokeTestOptions& options) {
         << "  wait=3s\n";
 
     MotionChannelMap channel_map{};
-    channel_map.base = 0;
-    channel_map.lower = 1;
-    channel_map.upper = 2;
-    channel_map.gripper = 3;
+    channel_map.base = kBaseServoChannel;
+    channel_map.lower = kLowerServoChannel;
+    channel_map.upper = kUpperServoChannel;
+    channel_map.gripper = kGripServoChannel;
 
     if (!motion_controller_.initialise(kDefaultI2cDevicePath,
                                        kDefaultPca9685Address,
@@ -542,10 +546,10 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
            "higher usually means sharper marker edges.\n";
 
     MotionChannelMap channel_map{};
-    channel_map.base = 0;
-    channel_map.lower = 1;
-    channel_map.upper = 2;
-    channel_map.gripper = 3;
+    channel_map.base = kBaseServoChannel;
+    channel_map.lower = kLowerServoChannel;
+    channel_map.upper = kUpperServoChannel;
+    channel_map.gripper = kGripServoChannel;
 
     if (!motion_controller_.initialise(kDefaultI2cDevicePath,
                                        kDefaultPca9685Address,

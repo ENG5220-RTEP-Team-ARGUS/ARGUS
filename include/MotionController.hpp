@@ -20,9 +20,9 @@ enum class MotionOutputState {
 
 struct MotionChannelMap {
     std::uint8_t base{0};
-    std::uint8_t lower{1};
-    std::uint8_t upper{2};
-    std::uint8_t gripper{3};
+    std::uint8_t lower{4};
+    std::uint8_t upper{8};
+    std::uint8_t gripper{12};
 };
 
 struct MeArmJointTargets {
