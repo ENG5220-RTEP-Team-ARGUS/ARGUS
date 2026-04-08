@@ -11,6 +11,7 @@
 #include <cctype>
 #include <chrono>
 #include <csignal>
+#include <cmath>
 #include <cstdint>
 #include <exception>
 #include <iomanip>
@@ -41,7 +42,6 @@ constexpr MotionChannelMap kMotionChannelMap{
 constexpr int kLiveFreezeBadFrameThreshold = 30;
 constexpr int kLiveRecoverGoodFrameThreshold = 3;
 constexpr std::chrono::milliseconds kSmokeStepDwell{3000};
-constexpr std::uint16_t kSmokeNeutralPulseTicks = 300;
 constexpr int kSmokeBaseMinOffset = -90;
 constexpr int kSmokeBaseMaxOffset = 90;
 constexpr int kSmokeLowerMinOffset = -90;
@@ -239,6 +239,12 @@ struct SmokeJointRunPlan {
     std::size_t count{0};
 };
 
+struct JointPulseCalibration {
+    std::uint16_t neg90_ticks;
+    std::uint16_t zero_ticks;
+    std::uint16_t pos90_ticks;
+};
+
 struct JointCalibrationMarks {
     bool has_neg90{false};
     bool has_zero{false};
@@ -254,6 +260,14 @@ constexpr std::array<SmokeJointSpec, MotionController::kServoCount> kSmokeJointS
     {"upper", "MeArm RIGHT", "bend/extend", kMotionChannelMap.upper, kSmokeUpperMinOffset, kSmokeUpperMaxOffset},
     {"grip", "MeArm CLAW", "open/close", kMotionChannelMap.gripper, kSmokeGripMinOffset, kSmokeGripMaxOffset},
 }};
+
+constexpr std::array<JointPulseCalibration, MotionController::kServoCount>
+    kJointPulseCalibration = {{
+        {100, 300, 500},
+        {100, 300, 500},
+        {100, 290, 500},
+        {100, 300, 500},
+    }};
 
 constexpr SmokeJointOffsets kSmokeHomePose{0, 0, 0, 0};
 
@@ -421,8 +435,21 @@ SmokeJointOffsets clampDemoOffsets(const SmokeJointOffsets& requested,
                                 clamped);
 }
 
-std::uint16_t offsetToPulseTicks(int offset, bool& clamped) {
-    const int raw = static_cast<int>(kSmokeNeutralPulseTicks) + offset;
+std::uint16_t logicalAngleToPulseTicks(std::size_t joint_index,
+                                       int angle_degrees,
+                                       bool& clamped) {
+    const JointPulseCalibration& calibration =
+        kJointPulseCalibration.at(joint_index);
+    const int zero_ticks = static_cast<int>(calibration.zero_ticks);
+    const int delta_ticks = angle_degrees >= 0
+                                ? static_cast<int>(calibration.pos90_ticks) -
+                                      zero_ticks
+                                : zero_ticks -
+                                      static_cast<int>(calibration.neg90_ticks);
+    const int raw = zero_ticks +
+                    static_cast<int>(std::lround(
+                        static_cast<double>(delta_ticks) *
+                        (static_cast<double>(angle_degrees) / 90.0)));
     const int bounded = std::clamp(
         raw, 0, static_cast<int>(MotionController::kMaxPulseTicks));
     if (bounded != raw) {
@@ -445,20 +472,20 @@ MeArmJointTargets makeSmokeTargets(const SmokeJointOffsets& requested,
                                    bool& clamped) {
     const SmokeJointOffsets bounded = clampSmokeOffsets(requested, clamped);
     return {
-        offsetToPulseTicks(bounded.base, clamped),
-        offsetToPulseTicks(bounded.lower, clamped),
-        offsetToPulseTicks(bounded.upper, clamped),
-        offsetToPulseTicks(bounded.grip, clamped)};
+        logicalAngleToPulseTicks(0, bounded.base, clamped),
+        logicalAngleToPulseTicks(1, bounded.lower, clamped),
+        logicalAngleToPulseTicks(2, bounded.upper, clamped),
+        logicalAngleToPulseTicks(3, bounded.grip, clamped)};
 }
 
 MeArmJointTargets makeDemoTargets(const SmokeJointOffsets& requested,
                                   bool& clamped) {
     const SmokeJointOffsets bounded = clampDemoOffsets(requested, clamped);
     return {
-        offsetToPulseTicks(bounded.base, clamped),
-        offsetToPulseTicks(bounded.lower, clamped),
-        offsetToPulseTicks(bounded.upper, clamped),
-        offsetToPulseTicks(bounded.grip, clamped)};
+        logicalAngleToPulseTicks(0, bounded.base, clamped),
+        logicalAngleToPulseTicks(1, bounded.lower, clamped),
+        logicalAngleToPulseTicks(2, bounded.upper, clamped),
+        logicalAngleToPulseTicks(3, bounded.grip, clamped)};
 }
 
 std::string formatOffsets(const SmokeJointOffsets& offsets) {

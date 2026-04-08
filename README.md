@@ -49,6 +49,7 @@ Current implemented capabilities:
 - guardian freeze / recover logic
 - interlock-gated motion
 - PCA9685-backed servo output
+- per-joint logical angle to pulse calibration
 - motion smoke tests
 - raw servo calibration mode
 - physical button test mode
@@ -173,6 +174,12 @@ sudo apt install -y build-essential cmake pkg-config libopencv-dev libcamera-too
 - `channel 4` -> `lower` -> MeArm `LEFT`
 - `channel 8` -> `upper` -> MeArm `RIGHT`
 - `channel 12` -> `grip` -> MeArm `CLAW`
+
+### Current logical angle calibration
+- base: `-90 -> 100`, `0 -> 300`, `+90 -> 500`
+- lower: `-90 -> 100`, `0 -> 300`, `+90 -> 500`
+- upper: `-90 -> 100`, `0 -> 290`, `+90 -> 500`
+- grip: `-90 -> 100`, `0 -> 300`, `+90 -> 500`
 
 ### Rear-view arm semantics
 - `base`: rotates the whole arm left / right
