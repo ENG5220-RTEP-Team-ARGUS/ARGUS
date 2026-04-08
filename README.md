@@ -581,7 +581,11 @@ v4l2-ctl --list-formats-ext -d /dev/video0
 
 | Name | Contribution |
 |------|-------------|
-| ARGUS team | System design, hardware integration, safety pipeline, motion control, and validation are reflected in the repository history and pull requests |
+| Member 1 |  |
+| Member 2 |  |
+| Member 3 |  |
+| Member 4 |  |
+| Member 5 |  |
 
 ---
 
