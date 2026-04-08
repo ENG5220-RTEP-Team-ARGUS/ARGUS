@@ -27,6 +27,7 @@ public:
 
     int runGuardianScenarioDemo();
     int runButtonTest();
+    int runInteractiveServoConsole();
     int runMotionHomePose();
     int runMotionSmokeTest(const MotionSmokeTestOptions& options);
     int runFullPipelineDemo(const LiveTestOptions& options);

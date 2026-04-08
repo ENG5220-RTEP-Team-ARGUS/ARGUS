@@ -285,7 +285,33 @@ or directly:
 ./build/ARGUS --motion-home
 ```
 
-#### 5) Physical button test
+#### 5) Interactive servo console
+Runs an interactive terminal console for direct joint positioning through the existing motion path:
+
+```bash
+./scripts/servo_console.sh
+```
+
+or directly:
+
+```bash
+./build/ARGUS --servo-console
+```
+
+Usage examples:
+- `base 90`
+- `lower -30`
+- `upper 45`
+- `grip 10`
+- `home`
+- `status`
+
+Behavior:
+- commands set one joint while keeping the others at their current logical positions
+- logical range is clamped to `-90..+90`
+- use `Ctrl+C` or `exit` to quit
+
+#### 6) Physical button test
 Runs the GPIO-backed physical button module by itself:
 
 ```bash
@@ -298,7 +324,7 @@ or directly:
 sudo -E ./build/ARGUS --button-test
 ```
 
-#### 6) Full pipeline hardware demo
+#### 7) Full pipeline hardware demo
 Runs camera + vision + guardian + interlock + motion through the normal safety path:
 
 ```bash

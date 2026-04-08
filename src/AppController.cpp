@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <csignal>
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
@@ -47,6 +48,7 @@ constexpr int kSmokeGripMinOffset = -90;
 constexpr int kSmokeGripMaxOffset = 90;
 constexpr int kSmokePositiveStep = 90;
 constexpr int kSmokeNegativeStep = -90;
+volatile std::sig_atomic_t g_interactive_servo_stop_requested = 0;
 constexpr std::chrono::milliseconds kMotionHomeSettleDwell{2000};
 constexpr int kDemoFreezeBadFrameThreshold = 1;
 constexpr int kDemoRecoverGoodFrameThreshold = 3;
@@ -91,6 +93,10 @@ public:
 private:
     MotionController& motion_controller_;
 };
+
+void handleInteractiveServoSignal(int) {
+    g_interactive_servo_stop_requested = 1;
+}
 
 double computeFocusScore(const cv::Mat& image) {
     if (image.empty()) {
@@ -414,6 +420,16 @@ std::string formatTargets(const MeArmJointTargets& targets) {
     return oss.str();
 }
 
+std::string toLowerCopy(std::string text) {
+    std::transform(text.begin(),
+                   text.end(),
+                   text.begin(),
+                   [](unsigned char ch) {
+                       return static_cast<char>(std::tolower(ch));
+                   });
+    return text;
+}
+
 }  // namespace
 
 AppController::AppController() noexcept = default;
@@ -527,6 +543,157 @@ int AppController::runButtonTest() {
 
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
+}
+
+int AppController::runInteractiveServoConsole() {
+    std::cout
+        << "[SERVO] interactive servo console\n"
+        << "[SERVO] commands: base <deg>, lower <deg>, upper <deg>, grip <deg>\n"
+        << "[SERVO] extras: home, status, help\n"
+        << "[SERVO] range: -90..+90 logical degrees\n"
+        << "[SERVO] quit: Ctrl+C or type 'exit'\n";
+
+    if (!motion_controller_.initialise(kDefaultI2cDevicePath,
+                                       kDefaultPca9685Address,
+                                       kDefaultPwmFrequencyHz,
+                                       kMotionChannelMap)) {
+        std::cerr << "[SERVO] init failed: "
+                  << motion_controller_.lastErrorString() << std::endl;
+        return 1;
+    }
+
+    auto fail = [&](const std::string& message) {
+        std::cerr << "[SERVO] " << message << std::endl;
+        motion_controller_.shutdown();
+        return 1;
+    };
+
+    SmokeJointOffsets current_offsets = kSmokeHomePose;
+    bool initial_clamped = false;
+    const MeArmJointTargets home_targets =
+        makeSmokeTargets(current_offsets, initial_clamped);
+
+    if (!motion_controller_.setTargets(home_targets)) {
+        return fail(std::string("failed to stage home pose: ") +
+                    motion_controller_.lastErrorString());
+    }
+
+    if (!motion_controller_.enable()) {
+        return fail(std::string("failed to enable motion: ") +
+                    motion_controller_.lastErrorString());
+    }
+
+    std::cout << "[SERVO] home " << formatOffsets(current_offsets) << std::endl;
+
+    const auto previous_sigint = std::signal(SIGINT, handleInteractiveServoSignal);
+    const auto previous_sigterm = std::signal(SIGTERM, handleInteractiveServoSignal);
+    g_interactive_servo_stop_requested = 0;
+
+    auto restoreSignals = [&]() {
+        std::signal(SIGINT, previous_sigint);
+        std::signal(SIGTERM, previous_sigterm);
+    };
+
+    auto applyOffsets = [&](const SmokeJointOffsets& requested,
+                            const std::string& label) -> bool {
+        bool clamped = false;
+        const SmokeJointOffsets bounded = clampSmokeOffsets(requested, clamped);
+        const MeArmJointTargets targets = makeSmokeTargets(bounded, clamped);
+
+        if (!motion_controller_.setTargets(targets)) {
+            (void)fail(std::string("failed to set ") + label + ": " +
+                       motion_controller_.lastErrorString());
+            return false;
+        }
+
+        current_offsets = bounded;
+        std::cout << "[SERVO] " << label << " " << formatOffsets(current_offsets);
+        if (clamped) {
+            std::cout << " [clamped]";
+        }
+        std::cout << std::endl;
+        return true;
+    };
+
+    while (!g_interactive_servo_stop_requested) {
+        std::cout << "servo> " << std::flush;
+
+        std::string line;
+        if (!std::getline(std::cin, line)) {
+            if (g_interactive_servo_stop_requested) {
+                break;
+            }
+            if (std::cin.eof()) {
+                break;
+            }
+            restoreSignals();
+            return fail("stdin read failed");
+        }
+
+        std::istringstream iss(line);
+        std::string command;
+        if (!(iss >> command)) {
+            continue;
+        }
+
+        command = toLowerCopy(command);
+        if (command == "exit" || command == "quit") {
+            break;
+        }
+
+        if (command == "help") {
+            std::cout
+                << "[SERVO] commands: base <deg>, lower <deg>, upper <deg>, grip <deg>, home, status, exit"
+                << std::endl;
+            continue;
+        }
+
+        if (command == "status") {
+            std::cout << "[SERVO] " << formatOffsets(current_offsets)
+                      << std::endl;
+            continue;
+        }
+
+        if (command == "home") {
+            if (!applyOffsets(kSmokeHomePose, "home")) {
+                restoreSignals();
+                return 1;
+            }
+            continue;
+        }
+
+        int angle = 0;
+        if (!(iss >> angle)) {
+            std::cout << "[SERVO] expected: <joint> <angle>" << std::endl;
+            continue;
+        }
+
+        SmokeJointOffsets requested = current_offsets;
+        if (command == "base") {
+            requested.base = angle;
+        } else if (command == "lower") {
+            requested.lower = angle;
+        } else if (command == "upper") {
+            requested.upper = angle;
+        } else if (command == "grip" || command == "gripper") {
+            requested.grip = angle;
+        } else {
+            std::cout << "[SERVO] unknown joint: " << command << std::endl;
+            continue;
+        }
+
+        std::ostringstream label;
+        label << command << "=" << angle;
+        if (!applyOffsets(requested, label.str())) {
+            restoreSignals();
+            return 1;
+        }
+    }
+
+    restoreSignals();
+    motion_controller_.shutdown();
+    std::cout << "[SERVO] done" << std::endl;
+    return 0;
 }
 
 int AppController::runMotionHomePose() {
