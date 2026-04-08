@@ -28,8 +28,8 @@ realtime/event-driven style shown in the Bernd Porr references.
 | Reference repo | Role for ARGUS | Current fit | Main gap | Planned action | Priority |
 | --- | --- | --- | --- | --- | --- |
 | `realtime_cpp_coding` | Compliance standard and design checklist | Partial | ARGUS still has polling-heavy control loops and ad hoc timing | Use as the top-level standard for all compliance decisions and document gaps against it | High |
-| `cppTimer` | Timer implementation candidate | Medium | `src/AppController.cpp` still uses `std::this_thread::sleep_for(...)` for demo/smoke/home timing | Adopt its `timerfd` model through a tracked local `RealtimeTimer` wrapper and replace sleep-driven timing with timer callbacks | High |
-| `libcamera2opencv` | Camera backend replacement candidate | Medium | `src/CameraCapture.cpp` still relies on OpenCV `VideoCapture` plus `libcamerify`/V4L2 handling for the active default path | Use a tracked optional external dependency behind the new backend boundary and validate it on the Pi before considering it for default use | High |
+| `cppTimer` | Timer implementation source | High | Directly integrated, but button test still contains a small polling sleep | Vendor `cppTimer` under `third_party/` and use it as the timer primitive for control pacing | High |
+| `libcamera2opencv` | Camera backend source | High | Bundled backend is integrated, but still needs Pi validation and dependency availability | Vendor `libcamera2opencv` under `third_party/`, try it first in auto mode, and fall back to OpenCV/V4L2 only if it fails | High |
 | `cpp_event_callbacks` | Architectural guidance for event handoff | Medium | Top-level control still polls for button/camera/demo progression instead of receiving events | Refactor timer/frame/button flow toward callback-driven interfaces without redesigning the whole architecture | Medium |
 | `rpi_pwm` | Alternative PWM path | Not applicable to current design | ARGUS uses PCA9685 over I2C, not Pi PWM GPIO18/19 | Document as out of scope unless motion hardware is redesigned | Low |
 
@@ -50,9 +50,7 @@ Current compliance gaps:
 
 Compliance action:
 
-- replace sleep-driven periodic behavior with `cppTimer`
-- replace sleep-driven periodic behavior with the local `RealtimeTimer`
-  wrapper based on the same Linux `timerfd` primitive
+- replace sleep-driven periodic behavior with vendored `cppTimer`
 - move recurring events into explicit timer callbacks
 - keep `AppController` as orchestrator, but reduce loop-centric control
 
@@ -68,10 +66,9 @@ Compliance action:
 
 - keep the `CameraCapture` role intact
 - refactor implementation behind that interface
-- use the new backend boundary to host an optional external
-  `libcamera2opencv` backend
-- do not vendor the local `libcamera2opencv` reference directly
-- keep the current path only as a fallback during transition
+- host the vendored `libcamera2opencv` backend behind that boundary
+- prefer the Bernd backend first in auto mode
+- keep the current OpenCV/V4L2 path as a fallback only
 
 ### `src/PhysicalButtonModule.cpp`
 
@@ -102,23 +99,20 @@ Compliance action:
 The local `compliance/` folder is reference material only. It is ignored by
 git and must not become a hidden build dependency.
 
-If ARGUS adopts code from those repos, it must be done through one of these
-tracked approaches:
+ARGUS now uses the first tracked approach for the relevant Bernd components:
 
-1. vendor a reviewed snapshot into a tracked `third_party/` directory
-2. add a documented git submodule
-3. re-implement the needed behavior locally with clear attribution
+1. vendor reviewed snapshots into `third_party/`
 
-ARGUS must not depend on untracked local clones in `compliance/`.
+The local `compliance/` folder remains reference material only. ARGUS must not
+depend on untracked local clones in `compliance/`.
 
-For `cppTimer`, ARGUS has chosen the third option: a local tracked
-re-implementation of the needed `timerfd` behavior. This avoids pulling GPL
-code directly into the MIT-licensed project while still aligning with the same
-Linux realtime primitive and callback model.
+Current direct integrations:
 
-For `libcamera2opencv`, ARGUS has chosen a tracked optional external dependency
-strategy. The reference is not copied into the repository. Instead, ARGUS
-builds against an installed `cam2opencv` library only when explicitly enabled.
+- `third_party/cppTimer`
+- `third_party/libcamera2opencv`
+
+Licensing and attribution for those components is documented in
+`THIRD_PARTY_NOTICES.md`.
 
 ## Compliance Phases
 
@@ -130,14 +124,14 @@ builds against an installed `cam2opencv` library only when explicitly enabled.
 
 ### Phase 2: timer compliance
 
-- integrate the local tracked `RealtimeTimer` wrapper
+- integrate vendored `cppTimer`
 - remove important `sleep_for(...)` usage from `AppController`
 - convert demo/smoke/home pacing to timer-driven callbacks
 
 ### Phase 3: camera compliance
 
 - add a backend boundary inside `CameraCapture`
-- integrate a separately tracked optional `libcamera2opencv` dependency
+- integrate vendored `libcamera2opencv`
 - validate `--live-test` and `--full-demo` on the Pi with the new backend
 
 ### Phase 4: event-flow cleanup
@@ -156,6 +150,6 @@ builds against an installed `cam2opencv` library only when explicitly enabled.
 
 ## Immediate Next Work
 
-1. Choose a tracked integration method for `cppTimer`.
-2. Replace the first `sleep_for(...)` path in `src/AppController.cpp`.
-3. Build and validate the optional `libcamera2opencv` backend on the Pi.
+1. Validate the vendored `cppTimer` path on the Pi.
+2. Validate the vendored `libcamera2opencv` backend on the Pi.
+3. Remove the remaining non-critical polling sleep in button test if needed.

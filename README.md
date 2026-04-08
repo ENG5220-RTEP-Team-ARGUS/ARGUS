@@ -149,15 +149,16 @@ sudo apt update
 sudo apt install -y build-essential cmake pkg-config libopencv-dev libcamera-tools
 ```
 
-### Optional compliance camera backend packages
-If you want to build the optional `libcamera2opencv` backend:
+### Bundled Bernd compliance backend packages
+To build the bundled `libcamera2opencv` backend in this repo:
 ```bash
 sudo apt install -y libcamera-dev libturbojpeg0-dev
 ```
 
-Then install `cam2opencv` separately and configure ARGUS with:
+Then configure and build ARGUS. The vendored backend will be compiled
+automatically when the dependencies are present:
 ```bash
-cmake -S . -B build -DARGUS_ENABLE_LIBCAMERA2OPENCV=ON
+cmake -S . -B build
 cmake --build build -j$(nproc)
 ```
 
@@ -165,9 +166,13 @@ cmake --build build -j$(nproc)
 - use `libcamerify` for Pi camera modes
 - full demo self-elevates with `sudo` because the physical button uses the GPIO character-device interface
 - the current default expected marker ID is `23`
-- when built with `ARGUS_ENABLE_LIBCAMERA2OPENCV=ON`, you can select the
-  callback-based camera backend with:
+- the project vendors Bernd Porr `cppTimer` and `libcamera2opencv` under `third_party/`
+- in auto mode, camera capture now tries the bundled Bernd backend first and
+  falls back to the older OpenCV/V4L2 path only if that fails
+- you can force the Bernd camera backend with:
   `ARGUS_CAMERA_BACKEND=libcamera2opencv`
+- third-party licensing and attribution are documented in
+  [THIRD_PARTY_NOTICES.md](/home/nathan_sidib/Code/ENG5220-RTEP-ARGUS/ARGUS/THIRD_PARTY_NOTICES.md)
 
 ---
 
@@ -593,7 +598,18 @@ v4l2-ctl --list-formats-ext -d /dev/video0
 
 ## License
 
-*Specify license here.*
+This repository is mixed-license:
+
+- original ARGUS code outside `third_party/` is licensed under the MIT License
+- vendored Bernd Porr components under `third_party/` keep their original GPL
+  licenses
+- attribution and file-level licensing details are listed in
+  [THIRD_PARTY_NOTICES.md](/home/nathan_sidib/Code/ENG5220-RTEP-ARGUS/ARGUS/THIRD_PARTY_NOTICES.md)
+- if you redistribute a build of `ARGUS` that includes the vendored GPL
+  components, you must comply with those GPL terms
+
+See [LICENSE](/home/nathan_sidib/Code/ENG5220-RTEP-ARGUS/ARGUS/LICENSE) for the
+repository-level licensing note.
 
 ---
 

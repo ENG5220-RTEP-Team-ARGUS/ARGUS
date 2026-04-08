@@ -382,12 +382,11 @@ private:
 std::unique_ptr<CameraCaptureBackend> makeCameraBackend(CameraCapture::Options options) {
     const auto effective_preference =
         effectiveBackendPreference(options.backend_preference);
-    const bool libcamerify_active = isLibcamerifyActive();
 
     switch (effective_preference) {
         case CameraCapture::BackendPreference::Auto:
 #if defined(ARGUS_HAVE_LIBCAM2OPENCV)
-            if (!libcamerify_active) {
+            {
                 auto backend =
                     std::make_unique<Libcamera2OpenCvBackend>(options.camera_index);
                 if (backend->isOpen()) {
@@ -408,15 +407,6 @@ std::unique_ptr<CameraCaptureBackend> makeCameraBackend(CameraCapture::Options o
         }
         case CameraCapture::BackendPreference::Libcamera2OpenCv:
 #if defined(ARGUS_HAVE_LIBCAM2OPENCV)
-            if (libcamerify_active) {
-                std::cerr << "[CameraCapture] backend '"
-                          << backendPreferenceToString(effective_preference)
-                          << "' requested while libcamerify is active. "
-                             "Use the backend directly without libcamerify."
-                          << std::endl;
-                return nullptr;
-            }
-
             {
                 auto backend =
                     std::make_unique<Libcamera2OpenCvBackend>(options.camera_index);
@@ -430,7 +420,7 @@ std::unique_ptr<CameraCaptureBackend> makeCameraBackend(CameraCapture::Options o
                       << backendPreferenceToString(effective_preference)
                       << "' is not available in this build. "
                          "Configure with -DARGUS_ENABLE_LIBCAMERA2OPENCV=ON "
-                         "after installing cam2opencv."
+                         "and install the required libcamera/turbojpeg dependencies."
                       << std::endl;
             return nullptr;
 #endif

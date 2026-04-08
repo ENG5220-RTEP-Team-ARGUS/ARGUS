@@ -1,9 +1,9 @@
 #include "AppController.hpp"
 
 #include "CameraCapture.hpp"
+#include "CppTimerStdFuncCallback.h"
 #include "GuardianStateMachine.hpp"
 #include "PhysicalButtonModule.hpp"
-#include "RealtimeTimer.hpp"
 #include "RobotInterlock.hpp"
 #include "VisionProcessor.hpp"
 
@@ -106,7 +106,7 @@ void handleInteractiveServoSignal(int) {
     g_interactive_servo_stop_requested = 1;
 }
 
-bool waitForRealtimeDelay(std::chrono::nanoseconds delay,
+bool waitForCppTimerDelay(std::chrono::nanoseconds delay,
                           std::string& error_message) {
     if (delay.count() <= 0) {
         error_message.clear();
@@ -117,18 +117,26 @@ bool waitForRealtimeDelay(std::chrono::nanoseconds delay,
     std::condition_variable condition;
     bool fired = false;
 
-    RealtimeTimer timer;
-    if (!timer.startOneShot(delay, [&]() {
-            std::lock_guard<std::mutex> lock(mutex);
-            fired = true;
-            condition.notify_one();
-        })) {
-        error_message = timer.lastErrorString();
+    CppTimerCallback timer;
+    timer.registerEventCallback([&]() {
+        std::lock_guard<std::mutex> lock(mutex);
+        fired = true;
+        condition.notify_one();
+    });
+
+    try {
+        timer.startns(static_cast<long>(delay.count()), ONESHOT);
+    } catch (const char* exception) {
+        error_message = exception;
+        return false;
+    } catch (...) {
+        error_message = "CppTimer start failed";
         return false;
     }
 
     std::unique_lock<std::mutex> lock(mutex);
     condition.wait(lock, [&]() { return fired; });
+    timer.stop();
     error_message.clear();
     return true;
 }
@@ -1195,7 +1203,7 @@ int AppController::runMotionHomePose() {
     std::cout << std::endl;
 
     std::string timer_error;
-    if (!waitForRealtimeDelay(kMotionHomeSettleDwell, timer_error)) {
+    if (!waitForCppTimerDelay(kMotionHomeSettleDwell, timer_error)) {
         return fail(std::string("home dwell timer failed: ") + timer_error);
     }
 
@@ -1271,7 +1279,7 @@ int AppController::runMotionSmokeTest(const MotionSmokeTestOptions& options) {
         std::cout << "[SMOKE] wait 3s" << std::endl;
 
         std::string timer_error;
-        if (!waitForRealtimeDelay(kSmokeStepDwell, timer_error)) {
+        if (!waitForCppTimerDelay(kSmokeStepDwell, timer_error)) {
             return fail(std::string("smoke dwell timer failed: ") + timer_error);
         }
         return 0;
@@ -1295,7 +1303,7 @@ int AppController::runMotionSmokeTest(const MotionSmokeTestOptions& options) {
     std::cout << "[SMOKE] wait 3s" << std::endl;
     {
         std::string timer_error;
-        if (!waitForRealtimeDelay(kSmokeStepDwell, timer_error)) {
+        if (!waitForCppTimerDelay(kSmokeStepDwell, timer_error)) {
             return fail(std::string("initial smoke dwell timer failed: ") +
                         timer_error);
         }
@@ -1408,8 +1416,9 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
     bool home_pose_staged = false;
     std::string current_pose_name = "NONE";
     std::size_t next_step_index = 0;
-    RealtimeTimer demo_step_timer;
+    CppTimerCallback demo_step_timer;
     std::atomic<bool> demo_step_due{false};
+    bool demo_step_timer_started = false;
 
     auto fail = [&](const std::string& message) {
         std::cerr << "[DEMO] " << message << std::endl;
@@ -1437,19 +1446,32 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
     };
 
     auto stopDemoStepTimer = [&]() {
-        demo_step_timer.stop();
+        if (demo_step_timer_started) {
+            demo_step_timer.stop();
+            demo_step_timer_started = false;
+        }
         demo_step_due.store(false, std::memory_order_relaxed);
     };
 
     auto startDemoStepTimer = [&]() -> bool {
+        if (demo_step_timer_started) {
+            return true;
+        }
+
         demo_step_due.store(false, std::memory_order_relaxed);
-        if (!demo_step_timer.startPeriodic(
-                kDemoStepDwell,
-                [&]() { demo_step_due.store(true, std::memory_order_relaxed); })) {
-            (void)fail(std::string("demo step timer failed: ") +
-                       demo_step_timer.lastErrorString());
+        demo_step_timer.registerEventCallback(
+            [&]() { demo_step_due.store(true, std::memory_order_relaxed); });
+
+        try {
+            demo_step_timer.startms(static_cast<long>(kDemoStepDwell.count()), PERIODIC);
+        } catch (const char* exception) {
+            (void)fail(std::string("demo step timer failed: ") + exception);
+            return false;
+        } catch (...) {
+            (void)fail("demo step timer failed");
             return false;
         }
+        demo_step_timer_started = true;
         return true;
     };
 
@@ -1543,7 +1565,6 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
     };
 
     guardian.setOnFreezeCallback([&]() {
-        stopDemoStepTimer();
         motion_gate_open = false;
         waiting_for_ack = false;
         waiting_for_ack_announced = false;
@@ -1560,11 +1581,6 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
     guardian.setOnClearFreezeCallback([&]() {
         interlock.onControlEvent(ControlEvent::ALLOW_MOTION);
         if (interlock.state() == InterlockState::FAULT) {
-            motion_faulted = true;
-            return;
-        }
-
-        if (!startDemoStepTimer()) {
             motion_faulted = true;
             return;
         }
@@ -1651,7 +1667,7 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
             }
 
             std::string timer_error;
-            if (!waitForRealtimeDelay(kCaptureRetryBackoff, timer_error)) {
+            if (!waitForCppTimerDelay(kCaptureRetryBackoff, timer_error)) {
                 motion_faulted = true;
                 std::cerr << "[DEMO] retry timer failed: " << timer_error
                           << std::endl;
@@ -2037,7 +2053,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
             }
 
             std::string timer_error;
-            if (!waitForRealtimeDelay(kCaptureRetryBackoff, timer_error)) {
+            if (!waitForCppTimerDelay(kCaptureRetryBackoff, timer_error)) {
                 motion_faulted = true;
                 std::cerr << "[LIVE_TEST] retry timer failed: " << timer_error
                           << std::endl;

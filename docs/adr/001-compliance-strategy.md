@@ -1,6 +1,6 @@
 # ADR 001: Compliance Strategy for Bernd Porr Realtime References
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-04-08
 
 ## Context
@@ -34,9 +34,9 @@ ARGUS will adopt the Bernd Porr references in four different ways, depending on
 their role:
 
 1. `realtime_cpp_coding` is the compliance standard.
-2. `cppTimer` is the first behavior-level integration target.
-3. `libcamera2opencv` is the preferred optional external dependency for the
-   future Raspberry Pi camera backend.
+2. `cppTimer` is a direct vendored integration target.
+3. `libcamera2opencv` is the preferred direct vendored Raspberry Pi camera
+   backend.
 4. `cpp_event_callbacks` is architectural guidance for event handoff.
 5. `rpi_pwm` is out of scope for the current PCA9685-based design.
 
@@ -75,24 +75,18 @@ It will not replace the architecture wholesale.
 The local ignored `compliance/` folder is reference material only. ARGUS must
 not depend on it at build or runtime.
 
-If reference code is adopted, it must be brought into the tracked repository by
-one of these methods:
-
-1. vendored snapshot under a tracked third-party directory
-2. documented git submodule
-3. local re-implementation of the required behavior
+Reference code used for compliance is brought into the tracked repository as
+vendored snapshots under `third_party/`.
 
 This avoids hidden local dependencies and makes the compliance work reproducible
 for reviewers and CI.
 
-For the timer work, ARGUS will not vendor `cppTimer` directly because the local
-reference carries GPL licensing while ARGUS is MIT-licensed. Instead, ARGUS
-will re-implement the needed `timerfd` callback behavior locally in a tracked
-wrapper.
+ARGUS now directly vendors:
 
-For `libcamera2opencv`, ARGUS will not copy the local reference directly into
-the tree. Instead, ARGUS will integrate it as an explicit optional external
-dependency behind `CameraCapture`.
+- `third_party/cppTimer`
+- `third_party/libcamera2opencv`
+
+Their licensing and attribution are documented in `THIRD_PARTY_NOTICES.md`.
 
 ## Implementation Plan
 
@@ -115,8 +109,7 @@ Reason:
 
 Expected work:
 
-- integrate `cppTimer` using a tracked dependency strategy
-- use the local tracked `RealtimeTimer` wrapper as the chosen strategy
+- integrate vendored `cppTimer` directly
 - replace important `sleep_for(...)` timing in:
   - motion-home mode
   - motion smoke test
@@ -133,8 +126,8 @@ Expected work:
 
 - keep the `CameraCapture` abstraction
 - refactor its implementation so backend choice is internal
-- use that boundary to integrate the tracked optional `libcamera2opencv`
-  backend
+- use that boundary to integrate vendored `libcamera2opencv`
+- in auto mode, try the Bernd backend first and fall back only if it fails
 - validate live-test and full-demo on the Pi using the new backend
 
 ### Step 4: reduce polling and strengthen event handoff

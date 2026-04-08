@@ -1,3 +1,23 @@
+ARGUS repository licensing
+
+This repository contains both original ARGUS code and vendored third-party
+course reference code.
+
+Unless otherwise noted, files outside `third_party/` are licensed under the MIT
+License below.
+
+Vendored third-party components under `third_party/` keep their original
+licenses:
+
+- `third_party/cppTimer`: GNU GPL v3
+- `third_party/libcamera2opencv`: GPL-2.0-or-later
+
+See `THIRD_PARTY_NOTICES.md` and the per-component license files under
+`third_party/` for attribution and license texts.
+
+If you redistribute a build of ARGUS that includes the vendored GPL
+components, you must comply with the applicable GPL terms of those components.
+
 MIT License
 
 Copyright (c) 2026 ENG5220 RTEP [Team TBD]

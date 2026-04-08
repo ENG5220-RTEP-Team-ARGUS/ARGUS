@@ -5,8 +5,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(ARGUS_ENABLE_LIBCAMERA2OPENCV
-       "Enable optional libcamera2opencv camera backend"
-       OFF)
+       "Enable bundled libcamera2opencv camera backend when dependencies are available"
+       ON)
 
 find_package(OpenCV REQUIRED)
 find_package(Threads REQUIRED)
@@ -14,7 +14,6 @@ find_package(Threads REQUIRED)
 add_executable(ARGUS
     src/main.cpp
     src/AppController.cpp
-    src/RealtimeTimer.cpp
     src/GuardianStateMachine.cpp
     src/VisionProcessor.cpp
     src/CameraCapture.cpp
@@ -25,6 +24,7 @@ add_executable(ARGUS
 
 target_include_directories(ARGUS PRIVATE
     include
+    third_party/cppTimer
     ${OpenCV_INCLUDE_DIRS}
 )
 
@@ -34,29 +34,37 @@ target_link_libraries(ARGUS
 )
 
 if(ARGUS_ENABLE_LIBCAMERA2OPENCV)
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(ARGUS_LIBCAMERA REQUIRED IMPORTED_TARGET libcamera)
-    pkg_check_modules(ARGUS_TURBOJPEG REQUIRED IMPORTED_TARGET libturbojpeg)
-
-    find_path(ARGUS_LIBCAM2OPENCV_INCLUDE_DIR
-              NAMES libcam2opencv.h)
-    find_library(ARGUS_LIBCAM2OPENCV_LIBRARY
-                 NAMES cam2opencv)
-
-    if(NOT ARGUS_LIBCAM2OPENCV_INCLUDE_DIR OR NOT ARGUS_LIBCAM2OPENCV_LIBRARY)
-        message(FATAL_ERROR
-                "ARGUS_ENABLE_LIBCAMERA2OPENCV=ON but cam2opencv was not found. "
-                "Install libcamera2opencv first or configure with "
-                "-DARGUS_ENABLE_LIBCAMERA2OPENCV=OFF.")
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(ARGUS_LIBCAMERA QUIET IMPORTED_TARGET libcamera)
+        pkg_check_modules(ARGUS_TURBOJPEG QUIET IMPORTED_TARGET libturbojpeg)
     endif()
 
-    target_compile_definitions(ARGUS PRIVATE ARGUS_HAVE_LIBCAM2OPENCV=1)
-    target_include_directories(ARGUS PRIVATE
-        ${ARGUS_LIBCAM2OPENCV_INCLUDE_DIR}
-    )
-    target_link_libraries(ARGUS
-        ${ARGUS_LIBCAM2OPENCV_LIBRARY}
-        PkgConfig::ARGUS_LIBCAMERA
-        PkgConfig::ARGUS_TURBOJPEG
-    )
+    if(PkgConfig_FOUND AND ARGUS_LIBCAMERA_FOUND AND ARGUS_TURBOJPEG_FOUND)
+        add_library(argus_cam2opencv STATIC
+            third_party/libcamera2opencv/libcam2opencv.cpp
+            third_party/libcamera2opencv/libcam2opencv_format_converter.cpp
+        )
+
+        target_include_directories(argus_cam2opencv PUBLIC
+            third_party/libcamera2opencv
+            ${ARGUS_LIBCAMERA_INCLUDE_DIRS}
+            ${ARGUS_TURBOJPEG_INCLUDE_DIRS}
+            ${OpenCV_INCLUDE_DIRS}
+        )
+        target_link_libraries(argus_cam2opencv PUBLIC
+            PkgConfig::ARGUS_LIBCAMERA
+            PkgConfig::ARGUS_TURBOJPEG
+            ${OpenCV_LIBS}
+        )
+
+        target_compile_definitions(ARGUS PRIVATE ARGUS_HAVE_LIBCAM2OPENCV=1)
+        target_link_libraries(ARGUS argus_cam2opencv)
+        target_include_directories(ARGUS PRIVATE third_party/libcamera2opencv)
+    else()
+        message(WARNING
+                "Bundled libcamera2opencv backend disabled because required "
+                "dependencies were not found (pkg-config, libcamera, or "
+                "libturbojpeg). Falling back to the OpenCV/V4L2 path.")
+    endif()
 endif()
