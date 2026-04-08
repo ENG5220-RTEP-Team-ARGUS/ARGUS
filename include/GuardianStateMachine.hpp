@@ -17,13 +17,6 @@
  * @section thread_safety Thread Safety
  * All state variables use std::atomic for lock-free thread safety.
  * Callbacks are executed synchronously within the calling thread.
- *
- * @section realtime Real-Time Considerations
- * - Event-driven architecture using callbacks (no polling)
- * - Non-blocking state transitions
- * - Deterministic execution paths
- * - No dynamic memory allocation in critical paths
- * - Suitable for hard real-time systems with proper callback implementation
  */
 
 #ifndef GUARDIAN_STATE_MACHINE_HPP  // To prevent multiple inclusion of this header file
@@ -107,31 +100,6 @@ enum class GuardianAction {
  * - No dynamic memory allocation in critical paths
  * - All data structures are stack-allocated or atomic
  * - Callbacks use std::function
- *
- * **Real-Time Suitability:**
- * - Non-blocking operations (no sleep/wait)
- * - Predictable execution time
- * - Lock-free atomic operations
- * - Suitable for hard real-time systems when callbacks are properly implemented
- *
- * @section usage_example Usage Example
- * @code
- * // Initialize with thresholds
- * GuardianStateMachine guardian(30, 3);  // 30 bad frames to freeze, 3 good to recover
- *
- * // Register callbacks for hardware control
- * guardian.setOnFreezeCallback([]() {
- *     robotArm.emergencyStop();
- * });
- *
- * guardian.setOnClearFreezeCallback([]() {
- *     robotArm.resumeMotion();
- * });
- *
- * // Process frames in real-time loop
- * while (running) {
- *     FrameStatus status = visionSystem.analyzeFrame();
- *     guardian.processFrame(status);
  */
 class GuardianStateMachine {
 private:
@@ -246,7 +214,6 @@ private:
      * - NONE: No operation (state change only)
      *
      * @note Callbacks are executed synchronously in the calling thread
-     * @warning Callbacks must be non-blocking to maintain real-time performance
      */
     void executeAction(GuardianAction action);
 
@@ -285,8 +252,6 @@ private:
      * @param action Description of the action being executed
      *
      * @details Provides clear audit trail of safety-critical actions.
-     *
-     * @note Uses std::cout - consider replacing with proper logging system for production
      */
     void logAction(const std::string& action);
 
@@ -312,9 +277,6 @@ public:
      *
      * @details Convenience wrapper that converts FrameStatus to GuardianEvent
      *          and calls processEvent(). Use this for frame-based monitoring.
-     *
-     * @note Non-blocking, suitable for real-time loops
-     * @note Thread-safe - can be called from multiple threads
      */
     void processFrame(FrameStatus status);
 
@@ -372,7 +334,7 @@ public:
      * @details Thread-safe read of atomic state variable.
      *          Can be called from any thread without synchronization.
      *
-     * @note Returns snapshot of state at call time - may change immediately after
+     * @note Returns snapshot of state at call time, may change immediately after
      */
     GuardianState getState() const;
 
@@ -383,14 +345,7 @@ public:
      * @details Thread-safe read of atomic motionBlocked flag.
      *          This is the primary query for motion control systems.
      *
-     * **Usage in Motion Control:**
-     * @code
-     * if (!guardian.isMotionBlocked()) {
-     *     robotArm.executeMotion();
-     * }
-     * @endcode
-     *
-     * @note Returns snapshot at call time - may change immediately after
+     * @note Returns snapshot at call time, may change immediately after
      */
     bool isMotionBlocked() const;
 
@@ -401,7 +356,7 @@ public:
      * @details Inverse of isMotionBlocked() for convenience.
      *          Semantically clearer in some contexts.
      *
-     * @note Returns snapshot at call time - may change immediately after
+     * @note Returns snapshot at call time, may change immediately after
      */
     bool isMotionAllowed() const;
 
@@ -448,10 +403,6 @@ public:
      *
      * @details Convenience wrapper around stateToString(currentState).
      *          Thread-safe due to atomic state variable.
-     *
-     * @code
-     * std::cout << "Current state: " << guardian.getCurrentStateString() << std::endl;
-     * @endcode
      */
     std::string getCurrentStateString() const;
 
