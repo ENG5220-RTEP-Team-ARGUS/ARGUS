@@ -16,6 +16,7 @@
 - [Testing](#testing)
 - [Project Structure](#project-structure)
 - [Core Components](#core-components)
+- [Real-Time Design & Latency](#real-time-design--latency)
 - [Documentation](#documentation)
 - [Social Media & PR](#social-media--pr)
 - [Authors & Contributions](#authors--contributions)
@@ -26,95 +27,130 @@
 ---
 
 ## Overview
-<p align="justify">
-A.R.G.U.S. (adaptive real-time guardian for unsafe situations) is a real-time, vision-based safety supervision layer for robotic manipulators. It continuously monitors the workspace, evaluates collision or interference risk under strict latency constraints, and triggers fail-safe interventions (e.g. hard stop) via event-driven control, prioritising deterministic response and safe interruption.
-</p>
+<p align="justify"> A.R.G.U.S (Adaptive Real-Time Guardian for Unsafe Situations) is a real-time, vision-based safety system for robotic manipulators, designed for high-risk environments such as surgical robotics and industrial automation. It continuously monitors the workspace - particularly during critical operations like instrument exchange - where unexpected motion can cause damage or injury. By analysing visual input under strict latency constraints, A.R.G.U.S. detects deviations from expected conditions and immediately triggers fail-safe interventions (e.g. hard stops) using event-driven control. This ensures deterministic, reliable interruption of motion, preventing accidents before they occur.</p>
 
-This branch is the first fully working Raspberry Pi hardware baseline for ARGUS. It has been validated with a camera, a PCA9685 servo driver, a MeArm, and a physical operator button.
+(INsert images of the setup)
 
-Current validated runtime path:
+### Current validated implementation
+This branch is the first fully working Raspberry Pi hardware baseline for ARGUS. The currently validated runtime path is:
 
 `AppController -> CameraCapture -> VisionProcessor -> GuardianStateMachine -> RobotInterlock -> MotionController`
 
-What ARGUS currently does:
-- captures live camera frames
-- detects and validates an ArUco marker
-- evaluates safety from marker visibility, ROI, and motion quality
-- runs guardian freeze/recovery logic
-- gates motion through the robot interlock
-- drives the MeArm through the PCA9685 path
-- supports a physical operator button for continue / acknowledge actions
+It has been exercised on real hardware with:
+- Raspberry Pi 5
+- Raspberry Pi camera
+- PCA9685 servo driver
+- MeArm test platform
+- physical operator button
+
+Current implemented capabilities:
+- live camera capture on Raspberry Pi
+- ArUco-based safety evaluation
+- guardian freeze / recover logic
+- interlock-gated motion
+- PCA9685-backed servo output
+- motion smoke tests
+- physical button test mode
+- full pipeline guarded hardware demo
 
 ---
 
 ## Real-World Use Case
-A.R.G.U.S is designed for safety-critical robotic workflows, including:
+A.R.G.U.S is designed for **safety-critical environments**, including:
 
-- surgical robotics
-- industrial robotic arms
-- human-robot collaboration setups
+- Surgical robotics (instrument exchange safety)
+- Industrial robotic arms (collision prevention)
+- Human-robot collaboration systems
 
-The current project focus is a marker-supervised manipulator workflow where unsafe visual conditions must stop motion immediately and only allow recovery through the normal guarded path.
+During operations such as **tool exchange**, unexpected motion can cause injury or system failure. A.R.G.U.S ensures the robot only operates under valid conditions, stopping instantly when anomalies occur.
+
+### Current project focus
+The current branch validates that safety workflow on a small real arm using marker-based supervision:
+- safe scene required before motion
+- freeze on unsafe visual state
+- operator acknowledgement required for recovery
+- motion always routed through the existing guardian/interlock path
 
 ---
 
 ## System Architecture
-- Camera input
-- ArUco-based safety assessment
+> *(Insert diagram from `/docs/architecture`)*
+
+- Camera input → event stream
+- Region of Interest (ROI) validation
 - Guardian state machine
-- Robot interlock safety gate
-- PCA9685-backed motion controller
-- Physical operator button routed through AppController
+- Fail-safe controller (stop signal)
 
-Current software path:
-
+### Current validated software path
 `AppController -> CameraCapture -> VisionProcessor -> GuardianStateMachine -> RobotInterlock -> MotionController`
+
+### Current guarded hardware path
+- CameraCapture acquires frames on the Pi
+- VisionProcessor evaluates marker-based safety
+- GuardianStateMachine decides freeze / recovery transitions
+- RobotInterlock blocks or allows motion
+- MotionController drives the PCA9685 servo output path
+- PhysicalButtonModule emits operator button events that AppController routes through the same guarded flow
 
 ---
 
 ## Bill of Materials (BOM)
 
 ### Controller
-| Component | Quantity | Notes |
-|----------|---------|-------|
-| Raspberry Pi 5 | 1 | Validated hardware target |
+| Component | Quantity | Cost (£) |
+|----------|---------|----------|
+| Raspberry Pi (Model TBD) | 1 | TBD |
 
 ### Sensors & Vision
-| Component | Quantity | Notes |
-|----------|---------|-------|
-| Raspberry Pi camera module | 1 | Used through `libcamera` / `libcamerify` |
-| Printed ArUco marker | 1 | Default expected ID is `23` |
+| Component | Quantity | Cost (£) |
+|----------|---------|----------|
+| Camera Module | 1 | TBD |
 
-### Motion & I/O
+### Additional Components
+| Component | Quantity | Cost (£) |
+|----------|---------|----------|
+| Robotic Arm (Test Platform) | 1 | TBD |
+
+**Total Cost:** TBD
+
+### Current validated bench hardware
 | Component | Quantity | Notes |
 |----------|---------|-------|
-| Adafruit PCA9685 servo driver | 1 | I2C servo output path |
-| MeArm test platform | 1 | 4-servo arm |
+| Raspberry Pi 5 | 1 | validated target |
+| Raspberry Pi camera | 1 | used with `libcamerify` |
+| Adafruit PCA9685 | 1 | I2C servo driver |
+| MeArm | 1 | 4-servo arm |
 | Servos | 4 | base / lower / upper / grip |
-| Momentary tactile push button | 1 | Physical continue / ACK input |
-| External 6V battery pack | 1 | Servo power |
+| Momentary tactile button | 1 | active-low physical continue / ACK |
+| External 6V battery pack | 1 | servo power |
 
 ---
 
 ## Installation & Setup
 
 ### Requirements
-- Linux / Raspberry Pi OS
-- C++17 compiler
-- CMake 3.10+
-- OpenCV with `aruco` and `highgui`
-- Raspberry Pi camera stack (`libcamera`)
+- Linux (Raspberry Pi OS)
+- C++17+
+- CMake ≥ 3.10
+- OpenCV (if used)
+- libgpiod
 
-Typical Raspberry Pi packages:
+### Install Dependencies
+```bash
+sudo apt update
+sudo apt install cmake libgpiod-dev
+```
 
+### Current validated Raspberry Pi packages
 ```bash
 sudo apt update
 sudo apt install -y build-essential cmake pkg-config libopencv-dev libcamera-tools
 ```
 
-Launch notes:
-- prefer running camera modes through `libcamerify`
-- full demo self-elevates because the physical button uses the GPIO character device
+### Setup notes for this branch
+- use `libcamerify` for Pi camera modes
+- full demo self-elevates with `sudo` because the physical button uses the GPIO character-device interface
+- the current default expected marker ID is `23`
 
 ---
 
@@ -128,44 +164,53 @@ Launch notes:
 
 ### Servo power
 - External `6V` battery pack -> MeArm board / servo power rail
-- PCA9685 ground, Pi ground, battery ground, and MeArm ground must all be shared
+- Pi ground, PCA9685 ground, battery ground, and MeArm ground must all be shared
 - Do not power the servos from the Pi
 
-### PCA9685 to MeArm mapping
+### PCA9685 channel mapping
 - `channel 0` -> `base` -> MeArm `BASE`
 - `channel 4` -> `lower` -> MeArm `LEFT`
 - `channel 8` -> `upper` -> MeArm `RIGHT`
 - `channel 12` -> `grip` -> MeArm `CLAW`
 
-### Rear-view arm meaning
-- `base`: rotates the whole arm left/right
-- `lower`: left-side servo, raises/lowers the lower link
-- `upper`: right-side servo, bends/extends the upper link
-- `grip`: opens/closes the claw
+### Rear-view arm semantics
+- `base`: rotates the whole arm left / right
+- `lower`: left-side servo, raises / lowers the lower link
+- `upper`: right-side servo, bends / extends the upper link
+- `grip`: opens / closes the claw
 
-### Physical ACK button
+### Physical button
 - BCM `GPIO24`, physical pin `18`
-- One side of the button -> `GPIO24`
-- Opposite side of the button -> `GND`
-- Active-low input with pull-up enabled
-- Place a 4-pin tactile button across the breadboard center gap
-- Do not wire `GPIO24` and `GND` to two legs on the same side of the tactile button
+- one side of the button -> `GPIO24`
+- opposite side -> `GND`
+- active-low input with pull-up
+- place a 4-pin tactile button across the breadboard center gap
+- do not wire `GPIO24` and `GND` to two legs on the same side of the tactile button
 
 ### Camera ribbon
-- Use `CAM/DISP0` or `CAM/DISP1` on the Pi 5
-- Power the Pi off before plugging or unplugging the camera cable
-- On the Pi side, ribbon pads face away from the connector latch
-- On the camera side, ribbon pads face toward the camera PCB
+- use `CAM/DISP0` or `CAM/DISP1` on the Pi 5
+- power the Pi off before plugging or unplugging the cable
+- on the Pi side, ribbon pads face away from the latch
+- on the camera side, ribbon pads face toward the camera PCB
 
 ### Quick fault isolation
-- If all servos chatter together, check shared power and ground first
-- If only one joint misbehaves, check that servo's linkage, orientation, and signal wire
-- If the button state looks inverted or stuck, check tactile button orientation first
+- if all servos chatter together, check shared power and ground first
+- if only one joint misbehaves, check that joint's linkage, orientation, and signal wire
+- if the button state is stuck or inverted, check tactile button orientation first
 
 ---
 
 ## Building the Project
 
+```bash
+git clone https://github.com/YOUR_REPO.git --recursive
+cd ARGUS
+
+cmake .
+make
+```
+
+### Current validated build flow
 From repository root:
 
 ```bash
@@ -179,14 +224,20 @@ If CMake fails with `Could not find OpenCVConfig.cmake`, install or configure th
 
 ## Running the System
 
-### 1) Guardian FSM scenario demo
+```bash
+./argus_main
+```
+
+### Current validated run modes
+
+#### 1) Guardian FSM scenario demo
 Runs built-in state-machine scenarios without live camera or hardware motion:
 
 ```bash
 ./build/ARGUS
 ```
 
-### 2) Live marker test
+#### 2) Live marker test
 Recommended on Raspberry Pi:
 
 ```bash
@@ -199,8 +250,8 @@ Options:
 - `--auto-ack`: auto-send operator acknowledge when frozen
 - `--help`: print usage
 
-### 3) Motion smoke test
-Runs a motion-only servo sweep through the existing `AppController -> MotionController` path. Use one joint at a time when isolating wiring, code, or mechanical binding.
+#### 3) Motion smoke test
+Runs a motion-only servo sweep through the existing `AppController -> MotionController` path:
 
 ```bash
 ./build/ARGUS --motion-smoke-test --base
@@ -216,21 +267,13 @@ Convenience wrappers:
 - `scripts/smoke_upper.sh`
 - `scripts/smoke_grip.sh`
 
-If you omit the joint flag, `--motion-smoke-test` runs all four joints in sequence.
-
 Selected joint pattern:
 1. Move all joints to home
 2. Move the selected joint `0 -> -90 -> +90 -> 0`
 3. Hold each step for about 3 seconds
 
-This mode is meant to confirm:
-- PCA9685 I2C output works
-- MeArm channel mapping is correct
-- each servo can move cleanly on its own
-- the arm returns to home after each sweep
-
-### 4) Move all joints to home
-Moves all four joints to logical `0` / home, waits briefly for the arm to settle, then exits.
+#### 4) Move all joints to home
+Moves all joints to logical `0` / home and exits:
 
 ```bash
 ./scripts/set_home.sh
@@ -242,9 +285,7 @@ or directly:
 ./build/ARGUS --motion-home
 ```
 
-This is the quickest way to send the arm back to its neutral position without running the smoke sweep.
-
-### 5) Physical button test
+#### 5) Physical button test
 Runs the GPIO-backed physical button module by itself:
 
 ```bash
@@ -257,7 +298,7 @@ or directly:
 sudo -E ./build/ARGUS --button-test
 ```
 
-### 6) Full pipeline hardware demo
+#### 6) Full pipeline hardware demo
 Runs camera + vision + guardian + interlock + motion through the normal safety path:
 
 ```bash
@@ -270,10 +311,7 @@ or directly:
 sudo -E libcamerify ./build/ARGUS --full-demo --camera-index 0 --expected-marker-id 23
 ```
 
-Convenience wrapper:
-- `scripts/full_demo.sh`
-
-Current full demo sequence:
+Current full demo dance:
 - `BASE +60`
 - `BASE -60`
 - `HOME`
@@ -287,44 +325,22 @@ Current full demo sequence:
 - `GRIP -60`
 - `HOME`
 
-Full demo behavior:
-- starts in a safe pre-arm observation state
-- waits for a safe scene before arm/start
-- uses `a`, `r`, or the physical button as continue input
-- freezes immediately on marker loss
-- requires safe-again plus operator continue to recover
-- resumes only through the guardian/interlock path
+Live-test controls:
+- `a`: arm guardian enforcement when current reading is safe
+- `d`: disarm and return to setup mode
+- `r`: acknowledge a frozen state and let the guardian recover
+- `q`: quit
 
-Window control:
+Full-demo controls:
 - `a`: continue
 - `r`: continue
 - `q`: quit
 
-### Live-test controls
-When `--live-test` is running:
-- `a`: arm guardian enforcement when the current reading is safe
-- `d`: disarm and return to setup mode
-- `r`: acknowledge a frozen state and let the guardian recover normally
-- `q`: quit
-- `Ctrl+C`: terminal stop fallback
-
-System starts in `DISARMED` mode by default.
-
-### Physical button module
-The wired operator button is a single active-low acknowledge input:
-- BCM `GPIO24`, physical pin `18`
-- one side of the button to GPIO24
-- the other side to GND
-- software debounce enabled in the module
-
-Event contract:
-- `ACK_REQUEST`: debounced press edge from the physical button
-
-Behavior:
+Physical button behavior:
 - in live mode, the button routes through the guardian/interlock acknowledgement path
-- in full demo, the same `ACK_REQUEST` is treated as `continue`
-- before full-demo arm, `continue` means `arm/start`
-- after a freeze, `continue` means `acknowledge and resume` once the scene is safe again
+- in full demo, the same `ACK_REQUEST` acts as `continue`
+- before arm, `continue` means `arm/start`
+- after a freeze, `continue` means `acknowledge and resume`
 
 GPIO overrides:
 - `ARGUS_BUTTON_ACK_GPIO` defaults to `24`
@@ -332,15 +348,15 @@ GPIO overrides:
 - `ARGUS_BUTTON_ACTIVE_LOW` defaults to `1`
 - `ARGUS_BUTTON_DEBOUNCE_MS` defaults to `50`
 
-Implementation note:
-- the module uses `/dev/gpiochip*` through the Linux GPIO character-device ABI
-- if the GPIO line is unavailable, the full demo exits early because the physical button is required
-
 ---
 
 ## Testing
 
-### Recommended live-test workflow
+```bash
+make test
+```
+
+### Current validated test workflow
 1. Start in `DISARMED` mode.
 2. Position the printed marker in view.
 3. Wait until the current reading is safe.
@@ -351,13 +367,14 @@ Implementation note:
 8. Press `d` to return to setup mode as needed.
 9. Press `q` to exit.
 
-### Physical validation completed
-The current branch has been validated on real hardware for:
+### Hardware validation completed
+Validated on real hardware:
 - motion smoke tests
 - full demo loop
 - camera capture
 - physical button input
-- freeze / safe-again / resume behavior
+- freeze / safe-again / resume path
+- rebuild-from-scratch repeatability on a second day
 
 ### What you should see
 In terminal:
@@ -379,57 +396,68 @@ In the OpenCV window:
 - `DEMO`
 - `FREEZE`
 
-### Guardian thresholds
-- live test freezes after `30` consecutive bad frames and recovers after `3` good frames
-- full demo freezes after `1` bad frame and recovers after `3` good frames
-
-### Marker and focus notes
-- default expected marker ID is `23`
-- vision uses ArUco dictionary `DICT_6X6_250`
-- if your printed marker differs, pass `--expected-marker-id`
-- focus debug is shown in live test
-- `FOCUS_SCORE` is a simple sharpness heuristic; higher usually means sharper marker edges
-
-### Safety note
-Live and demo modes are intended for guarded hardware validation. Freeze and enable still route through the PCA9685-backed motion path behind `RobotInterlock`; the operator button does not bypass that path.
-
 ---
 
 ## Project Structure
 
-```text
+```
 config/              # Configuration files
 docs/architecture/   # System diagrams
-include/             # Public headers
-scripts/             # Pi helper scripts
+include/             # Header files
 src/                 # Core implementation
-tests/               # Test assets / future automated tests
+tests/               # Unit tests
+```
+
+### Current branch additions
+```text
+scripts/             # Pi helper scripts for smoke tests, button test, full demo, and home pose
+build/               # out-of-tree build directory used by the validated flow
 ```
 
 ---
 
 ## Core Components
 
-### AppController
-Top-level orchestration for live test, smoke test, button test, and full demo modes.
+### Vision Processor
+- Processes camera frames as events
+- Extracts ROI and validates signal
 
-### CameraCapture
-Pi-oriented camera acquisition with V4L2-first behavior under `libcamerify`.
+### Guardian State Machine
+- Encodes `SAFE` / `UNSAFE` states
+- Handles transitions deterministically
 
-### VisionProcessor
-ArUco-based safety evaluation using marker presence, ROI, and motion checks.
+### Motion Controller
+- Issues stop signals
+- Interfaces with robotic system
 
-### GuardianStateMachine
-Encodes the freeze / reset / recover logic.
+### Current implemented modules
 
-### RobotInterlock
-Hardware-facing motion gate that blocks or allows actuation based on guardian state.
+#### AppController
+- top-level orchestration for scenario demo, live test, smoke test, button test, and full demo
 
-### MotionController
-PCA9685-backed servo output path for the MeArm.
+#### CameraCapture
+- Pi-oriented camera acquisition with V4L2-first behavior under `libcamerify`
 
-### PhysicalButtonModule
-GPIO-backed active-low button input with software debounce and semantic events.
+#### RobotInterlock
+- hardware-facing gate that blocks or allows motion
+
+#### PhysicalButtonModule
+- active-low GPIO-backed operator input with software debounce and semantic events
+
+---
+
+## Real-Time Design & Latency
+
+- Event-driven architecture (no polling)
+- Deterministic response times
+- Frame-based processing pipeline
+
+> ⚠️ *Add measured latency results here*
+
+### Current runtime notes
+- live test freezes after `30` consecutive bad frames and recovers after `3` good frames
+- full demo freezes after `1` bad frame and recovers after `3` good frames
+- live test shows focus score and safety overlays to support setup and debugging
 
 ---
 
@@ -439,10 +467,10 @@ GPIO-backed active-low button input with software debounce and semantic events.
 [https://github.com/ENG5220-RTEP-Team-ARGUS/ARGUS/wiki](https://github.com/ENG5220-RTEP-Team-ARGUS/ARGUS.wiki.git)
 
 ### Doxygen
-Public classes and interfaces are intended to be documented with Doxygen as the codebase stabilises.
+All public classes and interfaces are documented using Doxygen.
 
 ### Camera backend notes
-- In `libcamerify` mode, capture enforces a V4L2-first open policy
+- in `libcamerify` mode, capture enforces a V4L2-first open policy
 - startup logs show which backend/path was used
 - if frames fail repeatedly, check:
 
@@ -455,11 +483,12 @@ v4l2-ctl --list-formats-ext -d /dev/video0
 
 ## Social Media & PR
 
-- [Instagram](https://www.instagram.com/argus102026/)
-- [YouTube](https://www.youtube.com/@argus-w3g)
-- [LinkedIn](https://www.linkedin.com/company/a-r-g-u-s)
-- [TikTok](https://www.tiktok.com/@argusxisx61?_r=1&_t=ZN-95E4anYeInm)
+-  [Instagram](https://www.instagram.com/argus102026/)
+-  [YouTube](https://www.youtube.com/@argus-w3g)
+-  [LinkedIn](https://www.linkedin.com/company/a-r-g-u-s)
+-  [TikTok](https://www.tiktok.com/@argusxisx61?_r=1&_t=ZN-95E4anYeInm)
 
+### Platform Performance Summary
 ---
 
 ## Authors & Contributions
@@ -478,21 +507,22 @@ v4l2-ctl --list-formats-ext -d /dev/video0
 
 - Course lecturers
 - Lab technicians
-- Funding and support contributors
+- Funding/support sources
 
 ---
 
 ## License
 
-Specify license here.
+*Specify license here.*
 
 ---
 
 ## Future Work
 
 - [ ] Multi-camera integration
+- [ ] Advanced risk prediction
+- [ ] Full robotic system integration
+- [ ] Improved latency optimisation
 - [ ] More formal automated testing
 - [ ] Cleaner runtime logging
-- [ ] Advanced risk prediction
 - [ ] Additional operator controls
-- [ ] Further hardware tuning and latency measurement
