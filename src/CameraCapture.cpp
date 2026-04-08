@@ -20,6 +20,10 @@
 
 namespace {
 
+constexpr int kTargetFrameWidth = 640;
+constexpr int kTargetFrameHeight = 480;
+constexpr int kTargetFrameRate = 30;
+
 std::vector<std::string> buildLibcameraPipelines() {
     // Ordered from stricter caps to more permissive fallback.
     return {
@@ -128,6 +132,25 @@ CameraCapture::BackendPreference effectiveBackendPreference(
     return CameraCapture::BackendPreference::Auto;
 }
 
+cv::Mat normaliseCapturedFrame(const cv::Mat& frame) {
+    if (frame.empty()) {
+        return {};
+    }
+
+    if (frame.cols == kTargetFrameWidth && frame.rows == kTargetFrameHeight) {
+        return frame.clone();
+    }
+
+    cv::Mat resized;
+    cv::resize(frame,
+               resized,
+               cv::Size(kTargetFrameWidth, kTargetFrameHeight),
+               0.0,
+               0.0,
+               cv::INTER_LINEAR);
+    return resized;
+}
+
 }  // namespace
 
 class CameraCaptureBackend {
@@ -202,9 +225,9 @@ public:
         }
 
         if (cap_.isOpened()) {
-            (void)cap_.set(cv::CAP_PROP_FRAME_WIDTH, 640);
-            (void)cap_.set(cv::CAP_PROP_FRAME_HEIGHT, 480);
-            (void)cap_.set(cv::CAP_PROP_FPS, 30);
+            (void)cap_.set(cv::CAP_PROP_FRAME_WIDTH, kTargetFrameWidth);
+            (void)cap_.set(cv::CAP_PROP_FRAME_HEIGHT, kTargetFrameHeight);
+            (void)cap_.set(cv::CAP_PROP_FPS, kTargetFrameRate);
             (void)cap_.set(cv::CAP_PROP_READ_TIMEOUT_MSEC, 2000);
         }
     }
@@ -277,14 +300,12 @@ public:
     explicit Libcamera2OpenCvBackend(int camera_index) {
         Libcam2OpenCVSettings settings;
         settings.cameraIndex = static_cast<unsigned int>(std::max(camera_index, 0));
-        settings.width = 640;
-        settings.height = 480;
-        settings.framerate = 30;
+        settings.framerate = kTargetFrameRate;
 
         camera_.registerCallback([this](const cv::Mat& frame,
                                         const libcamera::ControlList&) {
             std::lock_guard<std::mutex> lock(mutex_);
-            latest_frame_ = frame.clone();
+            latest_frame_ = normaliseCapturedFrame(frame);
             const auto now = std::chrono::system_clock::now();
             latest_timestamp_ms_ =
                 std::chrono::duration_cast<std::chrono::milliseconds>(

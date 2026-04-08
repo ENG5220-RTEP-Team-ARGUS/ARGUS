@@ -164,7 +164,8 @@ cmake --build build -j$(nproc)
 ```
 
 ### Setup notes for this branch
-- use `libcamerify` for Pi camera modes
+- use the wrapper scripts for Pi camera modes; they try the compliance backend
+  first and use `libcamerify` only for the OpenCV/V4L2 fallback path
 - full demo self-elevates with `sudo` because the physical button uses the GPIO character-device interface
 - the current default expected marker ID is `23`
 - the project vendors Bernd Porr `cppTimer` and `libcamera2opencv` under `third_party/`
@@ -270,14 +271,22 @@ Runs built-in state-machine scenarios without live camera or hardware motion:
 Recommended on Raspberry Pi:
 
 ```bash
-libcamerify ./build/ARGUS --live-test --camera-index 0 --expected-marker-id 23
+./scripts/live_test.sh
 ```
 
 Options:
 - `--camera-index <n>`: camera index, default `0`
 - `--expected-marker-id <n>`: expected ArUco ID, default `23`
+- `--camera-backend <name>`: `auto`, `libcamera2opencv`, or `opencv`
 - `--auto-ack`: auto-send operator acknowledge when frozen
 - `--help`: print usage
+
+Notes:
+- `./scripts/live_test.sh` uses the default camera index `0` and expected
+  marker ID `23`
+- by default the wrapper tries `libcamera2opencv` first and falls back to the
+  older OpenCV/V4L2 path only if that run fails
+- if you want to force a backend explicitly, pass `--camera-backend`
 
 #### 3) Motion smoke test
 Runs a motion-only servo sweep through the existing `AppController -> MotionController` path:
@@ -394,7 +403,7 @@ Runs camera + vision + guardian + interlock + motion through the normal safety p
 or directly:
 
 ```bash
-sudo -E libcamerify ./build/ARGUS --full-demo --camera-index 0 --expected-marker-id 23
+sudo -E ./build/ARGUS --full-demo --camera-index 0 --expected-marker-id 23
 ```
 
 Current full demo dance:

@@ -229,6 +229,19 @@ const char* freezeReasonToString(FreezeReason reason) {
     }
 }
 
+const char* cameraBackendPreferenceToString(
+    CameraCapture::BackendPreference preference) {
+    switch (preference) {
+        case CameraCapture::BackendPreference::Auto:
+            return "auto";
+        case CameraCapture::BackendPreference::OpenCvVideoCapture:
+            return "opencv";
+        case CameraCapture::BackendPreference::Libcamera2OpenCv:
+            return "libcamera2opencv";
+    }
+    return "unknown";
+}
+
 const char* interlockStateToString(InterlockState state) {
     switch (state) {
         case InterlockState::SAFE:
@@ -1361,6 +1374,8 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
         << "[DEMO] full pipeline hardware demo\n"
         << "[DEMO] camera=" << options.camera_index
         << " marker=" << options.expected_marker_id << "\n"
+        << "[DEMO] camera_backend="
+        << cameraBackendPreferenceToString(options.backend_preference) << "\n"
         << "[DEMO] map base=0 lower=4 upper=8 grip=12\n"
         << "[DEMO] sequence HOME -> BASE +/-60 -> LOWER +/-60 -> UPPER +/-60 -> GRIP +/-60\n"
         << "[DEMO] freeze after 1 bad frame, recover after 3 good frames\n"
@@ -1381,7 +1396,11 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
     VisionConfig vision_config;
     vision_config.expectedMarkerId = options.expected_marker_id;
     VisionProcessor vision_processor(vision_config);
-    CameraCapture camera_capture(options.camera_index);
+    CameraCapture camera_capture(
+        CameraCapture::Options{options.camera_index, options.backend_preference});
+    std::cout << "[DEMO] camera_backend_active="
+              << camera_capture.backendImplementation() << " ("
+              << camera_capture.backendName() << ")" << std::endl;
     PhysicalButtonModule button_module;
     std::cout << "[DEMO] physical button module: "
               << (button_module.available() ? "configured" : "disabled");
@@ -1855,6 +1874,8 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         << "[LIVE_TEST] Starting live marker safety test mode\n"
         << "[LIVE_TEST] Camera index: " << options.camera_index << "\n"
         << "[LIVE_TEST] Expected marker ID: " << options.expected_marker_id << "\n"
+        << "[LIVE_TEST] Camera backend preference: "
+        << cameraBackendPreferenceToString(options.backend_preference) << "\n"
         << "[LIVE_TEST] Auto operator ack: "
         << (options.auto_ack ? "ON" : "OFF") << "\n"
         << "[LIVE_TEST] Controls: a=arm, d=disarm, r=ack, q=quit\n"
@@ -1886,6 +1907,11 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
     VisionConfig vision_config;
     vision_config.expectedMarkerId = options.expected_marker_id;
     VisionProcessor vision_processor(vision_config);
+    CameraCapture camera_capture(
+        CameraCapture::Options{options.camera_index, options.backend_preference});
+    std::cout << "[LIVE_TEST] Camera backend active: "
+              << camera_capture.backendImplementation() << " ("
+              << camera_capture.backendName() << ")" << std::endl;
 
     std::unique_ptr<GuardianStateMachine> guardian;
     std::unique_ptr<RobotInterlock> interlock;
@@ -2026,7 +2052,6 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         return true;
     };
 
-    CameraCapture camera_capture(options.camera_index);
     cv::namedWindow(kLiveWindowName, cv::WINDOW_AUTOSIZE);
 
     FrameEvent frame_event;

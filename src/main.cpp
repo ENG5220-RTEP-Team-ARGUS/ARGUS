@@ -31,6 +31,7 @@ void printUsage(const char* program_name) {
         << "\nOptions for --full-demo and --live-test:\n"
         << "  --camera-index <n>        Camera index (default: 0)\n"
         << "  --expected-marker-id <n>  Expected ArUco marker ID (default: 23)\n"
+        << "  --camera-backend <name>   Camera backend: auto, libcamera2opencv, or opencv (default: auto)\n"
         << "\nOptions for --live-test:\n"
         << "  --auto-ack                Auto-send operator acknowledge when frozen\n"
         << "  --help                    Show this message\n";
@@ -69,6 +70,23 @@ bool parseIntArg(const char* text, int& value) {
     } catch (const std::exception&) {
         return false;
     }
+}
+
+bool parseCameraBackendArg(const std::string& raw,
+                           CameraCapture::BackendPreference& preference) {
+    if (raw == "auto") {
+        preference = CameraCapture::BackendPreference::Auto;
+        return true;
+    }
+    if (raw == "opencv" || raw == "videocapture") {
+        preference = CameraCapture::BackendPreference::OpenCvVideoCapture;
+        return true;
+    }
+    if (raw == "libcamera2opencv" || raw == "libcamera" || raw == "cam2opencv") {
+        preference = CameraCapture::BackendPreference::Libcamera2OpenCv;
+        return true;
+    }
+    return false;
 }
 
 }  // namespace
@@ -144,8 +162,20 @@ int main(int argc, char* argv[]) {
             continue;
         }
 
-        if ((arg == "--camera-index" || arg == "--expected-marker-id") &&
+        if ((arg == "--camera-index" || arg == "--expected-marker-id" ||
+             arg == "--camera-backend") &&
             i + 1 < argc) {
+            if (arg == "--camera-backend") {
+                if (!parseCameraBackendArg(argv[i + 1], options.backend_preference)) {
+                    std::cerr << "Invalid camera backend for " << arg << ": "
+                              << argv[i + 1] << std::endl;
+                    return 1;
+                }
+
+                ++i;
+                continue;
+            }
+
             int parsed_value = 0;
             if (!parseIntArg(argv[i + 1], parsed_value)) {
                 std::cerr << "Invalid numeric value for " << arg << ": "

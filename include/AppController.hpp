@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CameraCapture.hpp"
 #include "MotionController.hpp"
 
 class AppController {
@@ -16,6 +17,8 @@ public:
         int camera_index = 0;
         int expected_marker_id = 23;
         bool auto_ack = false;
+        CameraCapture::BackendPreference backend_preference =
+            CameraCapture::BackendPreference::Auto;
     };
 
     struct MotionSmokeTestOptions {
