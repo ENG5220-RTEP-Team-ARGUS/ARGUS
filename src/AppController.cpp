@@ -2190,6 +2190,24 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         }
         home_pose_staged = true;
         next_routine_step_index = 0;
+
+        interlock->onControlEvent(ControlEvent::FREEZE_NOW, FreezeReason::UNKNOWN_FAULT);
+        if (interlock->state() == InterlockState::FAULT) {
+            motion_faulted = true;
+            std::cerr << "[LIVE_TEST] Unable to prepare motion path for arm: "
+                      << motion_controller_.lastErrorString() << std::endl;
+            return false;
+        }
+
+        interlock->operatorAcknowledge();
+        interlock->onControlEvent(ControlEvent::ALLOW_MOTION);
+        if (interlock->state() == InterlockState::FAULT) {
+            motion_faulted = true;
+            std::cerr << "[LIVE_TEST] Unable to enable motion on arm: "
+                      << motion_controller_.lastErrorString() << std::endl;
+            return false;
+        }
+
         if (!startLiveStepTimer()) {
             return false;
         }
