@@ -35,22 +35,22 @@ class GuardianStateMachine {
 private:
 
     // Current state of the state machine
-    GuardianState currentState;
+    std::atomic<GuardianState> currentState;
 
     // Counts consecutive bad frames (used in SAFE_MONITORING)
-    int badCount;
+    std::atomic<int> badCount;
 
     // Counts consecutive good frames (used in RESET_PENDING)
-    int goodCount;
+    std::atomic<int> goodCount;
 
     // Threshold: number of bad frames required to freeze
-    int freezeCount;
+    std::atomic<int> freezeCount;
 
     // Threshold: number of good frames required to clear freeze
-    int recoverCount;
+    std::atomic<int> recoverCount;
 
     // Indicates whether motion is currently blocked
-    bool motionBlocked;
+    std::atomic<bool> motionBlocked;
     
     // Callback function executed when freeze occurs
     std::function<void()> onFreezeCallback;
@@ -60,6 +60,9 @@ private:
 
     // Callback function executed when state changes
     std::function<void(GuardianState, GuardianState)> onStateChangeCallback;
+
+    // Main function that processes incoming events
+    void processEvent(GuardianEvent event);
 
     // Executes an action (FREEZE_NOW or CLEAR_FREEZE)
     void executeAction(GuardianAction action);
@@ -78,10 +81,7 @@ public:
     // Constructor with configurable thresholds:
     // fc = number of bad frames to trigger freeze
     // rc = number of good frames to clear freeze
-    GuardianStateMachine(int fc = 2, int rc = 3);    // Note: To be adjusted accordingly in future revisions
-    
-    // Main function that processes incoming events
-    void processEvent(GuardianEvent event);
+    GuardianStateMachine(int fc = 30, int rc = 3);    // Note: To be adjusted accordingly in future revisions
 
     // Convenience function to convert FrameStatus into GuardianEvent
     void processFrame(FrameStatus status);
