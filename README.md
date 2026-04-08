@@ -421,20 +421,23 @@ Current full demo dance:
 - `HOME`
 
 Live-test controls:
-- `a`: continue
-- `d`: disarm and return to setup mode
-- `r`: continue
+- `space`: single-button control
+- `a`, `r`, `d`: legacy aliases for the same control path
+- `1`: select routine 1 (`FULL_SWEEP`)
+- `2`: select routine 2 (`BASE_SCAN`)
+- `3`: select routine 3 (`GRIP_PULSE`)
 - `q`: quit
 
 Full-demo controls:
-- `a`: continue
-- `r`: continue
+- `space`: continue
+- `a`, `r`: legacy aliases
 - `q`: quit
 
 Physical button behavior:
-- in both live mode and full demo, the physical button acts as `continue`
-- before arm, `continue` means `arm/start`
-- after a freeze, `continue` means `acknowledge and resume`
+- in live mode and full demo, the physical button is the default single-button operator control
+- if disarmed and safe, press it to arm/start motion
+- if armed and running, press it again to disarm
+- if frozen and safe again, press it to acknowledge and resume
 
 GPIO overrides:
 - `ARGUS_BUTTON_ACK_GPIO` defaults to `24`
