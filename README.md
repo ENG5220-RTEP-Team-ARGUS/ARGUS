@@ -50,6 +50,7 @@ Current implemented capabilities:
 - interlock-gated motion
 - PCA9685-backed servo output
 - motion smoke tests
+- raw servo calibration mode
 - physical button test mode
 - full pipeline guarded hardware demo
 
@@ -311,7 +312,38 @@ Behavior:
 - logical range is clamped to `-90..+90`
 - use `Ctrl+C` or `exit` to quit
 
-#### 6) Physical button test
+#### 6) Servo calibration console
+Runs a raw-pulse calibration console for matching physical horn angle to PCA9685 pulse ticks:
+
+```bash
+./scripts/servo_calibrate.sh
+```
+
+or directly:
+
+```bash
+./build/ARGUS --servo-calibrate
+```
+
+Usage examples:
+- `base 320`
+- `base +5`
+- `base -5`
+- `mark base 0`
+- `mark base +90`
+- `mark base -90`
+- `summary`
+- `write`
+
+Behavior:
+- commands use raw PCA9685 pulse ticks, not logical degrees
+- one joint can be moved while the others stay where they are
+- `mark` stores the current pulse for that joint at `-90`, `0`, or `+90`
+- `summary` prints all saved calibration points
+- `write` saves the current summary to `config/servo_calibration_latest.txt`
+- use `Ctrl+C` or `exit` to quit
+
+#### 7) Physical button test
 Runs the GPIO-backed physical button module by itself:
 
 ```bash
@@ -324,7 +356,7 @@ or directly:
 sudo -E ./build/ARGUS --button-test
 ```
 
-#### 7) Full pipeline hardware demo
+#### 8) Full pipeline hardware demo
 Runs camera + vision + guardian + interlock + motion through the normal safety path:
 
 ```bash
@@ -436,7 +468,7 @@ tests/               # Unit tests
 
 ### Current branch additions
 ```text
-scripts/             # Pi helper scripts for smoke tests, button test, full demo, and home pose
+scripts/             # Pi helper scripts for smoke tests, calibration, button test, full demo, and home pose
 build/               # out-of-tree build directory used by the validated flow
 ```
 
@@ -459,7 +491,7 @@ build/               # out-of-tree build directory used by the validated flow
 ### Current implemented modules
 
 #### AppController
-- top-level orchestration for scenario demo, live test, smoke test, button test, and full demo
+- top-level orchestration for scenario demo, live test, smoke test, servo calibration, button test, and full demo
 
 #### CameraCapture
 - Pi-oriented camera acquisition with V4L2-first behavior under `libcamerify`

@@ -8,13 +8,17 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <chrono>
 #include <csignal>
 #include <cstdint>
+#include <exception>
 #include <iomanip>
 #include <iostream>
+#include <fstream>
 #include <memory>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 
@@ -235,6 +239,15 @@ struct SmokeJointRunPlan {
     std::size_t count{0};
 };
 
+struct JointCalibrationMarks {
+    bool has_neg90{false};
+    bool has_zero{false};
+    bool has_pos90{false};
+    std::uint16_t neg90_ticks{0};
+    std::uint16_t zero_ticks{0};
+    std::uint16_t pos90_ticks{0};
+};
+
 constexpr std::array<SmokeJointSpec, MotionController::kServoCount> kSmokeJointSpecs = {{
     {"base", "MeArm BASE", "yaw left/right", kMotionChannelMap.base, kSmokeBaseMinOffset, kSmokeBaseMaxOffset},
     {"lower", "MeArm LEFT", "raise/lower", kMotionChannelMap.lower, kSmokeLowerMinOffset, kSmokeLowerMaxOffset},
@@ -266,6 +279,8 @@ constexpr std::array<DemoPoseStep, 12> kDemoSequence = {{
     {"HOME", {0, 0, 0, 0}},
 }};
 
+std::string toLowerCopy(std::string text);
+
 const char* smokeJointSelectionToString(AppController::SmokeJoint joint) {
     switch (joint) {
         case AppController::SmokeJoint::All:
@@ -281,6 +296,42 @@ const char* smokeJointSelectionToString(AppController::SmokeJoint joint) {
         default:
             return "unknown";
     }
+}
+
+const char* smokeJointIndexToString(std::size_t index) {
+    switch (index) {
+        case 0:
+            return "base";
+        case 1:
+            return "lower";
+        case 2:
+            return "upper";
+        case 3:
+            return "grip";
+        default:
+            return "unknown";
+    }
+}
+
+bool smokeJointIndexFromName(const std::string& name, std::size_t& index) {
+    const std::string lower = toLowerCopy(name);
+    if (lower == "base") {
+        index = 0;
+        return true;
+    }
+    if (lower == "lower") {
+        index = 1;
+        return true;
+    }
+    if (lower == "upper") {
+        index = 2;
+        return true;
+    }
+    if (lower == "grip" || lower == "gripper") {
+        index = 3;
+        return true;
+    }
+    return false;
 }
 
 SmokeJointRunPlan makeSmokeJointRunPlan(AppController::SmokeJoint joint) {
@@ -380,6 +431,16 @@ std::uint16_t offsetToPulseTicks(int offset, bool& clamped) {
     return static_cast<std::uint16_t>(bounded);
 }
 
+std::uint16_t clampPulseTicks(int raw_ticks, bool& clamped) {
+    const int bounded = std::clamp(raw_ticks,
+                                   0,
+                                   static_cast<int>(MotionController::kMaxPulseTicks));
+    if (bounded != raw_ticks) {
+        clamped = true;
+    }
+    return static_cast<std::uint16_t>(bounded);
+}
+
 MeArmJointTargets makeSmokeTargets(const SmokeJointOffsets& requested,
                                    bool& clamped) {
     const SmokeJointOffsets bounded = clampSmokeOffsets(requested, clamped);
@@ -417,6 +478,101 @@ std::string formatTargets(const MeArmJointTargets& targets) {
         << ", upper=" << targets.upper_ticks
         << ", gripper=" << targets.gripper_ticks
         << "}";
+    return oss.str();
+}
+
+std::uint16_t pulseForJoint(const MeArmJointTargets& targets, std::size_t index) {
+    switch (index) {
+        case 0:
+            return targets.base_ticks;
+        case 1:
+            return targets.lower_ticks;
+        case 2:
+            return targets.upper_ticks;
+        case 3:
+            return targets.gripper_ticks;
+        default:
+            return 0;
+    }
+}
+
+void setPulseForJoint(MeArmJointTargets& targets,
+                      std::size_t index,
+                      std::uint16_t ticks) {
+    switch (index) {
+        case 0:
+            targets.base_ticks = ticks;
+            break;
+        case 1:
+            targets.lower_ticks = ticks;
+            break;
+        case 2:
+            targets.upper_ticks = ticks;
+            break;
+        case 3:
+            targets.gripper_ticks = ticks;
+            break;
+        default:
+            break;
+    }
+}
+
+bool parseCalibrationPoint(const std::string& text,
+                           const char*& label,
+                           int& nominal_degrees) {
+    const std::string lower = toLowerCopy(text);
+    if (lower == "-90" || lower == "neg90" || lower == "minus90") {
+        label = "-90";
+        nominal_degrees = -90;
+        return true;
+    }
+    if (lower == "0" || lower == "zero" || lower == "center" || lower == "centre") {
+        label = "0";
+        nominal_degrees = 0;
+        return true;
+    }
+    if (lower == "+90" || lower == "90" || lower == "pos90" || lower == "plus90") {
+        label = "+90";
+        nominal_degrees = 90;
+        return true;
+    }
+    return false;
+}
+
+std::string formatCalibrationMarks(std::size_t joint_index,
+                                   const JointCalibrationMarks& marks) {
+    std::ostringstream oss;
+    oss << smokeJointIndexToString(joint_index) << ": "
+        << "-90=";
+    if (marks.has_neg90) {
+        oss << marks.neg90_ticks;
+    } else {
+        oss << "unset";
+    }
+    oss << "  0=";
+    if (marks.has_zero) {
+        oss << marks.zero_ticks;
+    } else {
+        oss << "unset";
+    }
+    oss << "  +90=";
+    if (marks.has_pos90) {
+        oss << marks.pos90_ticks;
+    } else {
+        oss << "unset";
+    }
+    return oss.str();
+}
+
+std::string buildCalibrationSummary(
+    const std::array<JointCalibrationMarks, MotionController::kServoCount>& marks) {
+    std::ostringstream oss;
+    oss << "# ARGUS servo calibration summary\n"
+        << "# This report is informational only; values are not applied automatically.\n"
+        << "# Format: joint  -90=<ticks>  0=<ticks>  +90=<ticks>\n";
+    for (std::size_t i = 0; i < marks.size(); ++i) {
+        oss << formatCalibrationMarks(i, marks[i]) << "\n";
+    }
     return oss.str();
 }
 
@@ -543,6 +699,252 @@ int AppController::runButtonTest() {
 
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
+}
+
+int AppController::runServoCalibration() {
+    std::cout
+        << "[CAL] servo calibration console\n"
+        << "[CAL] raw PCA9685 pulse control in ticks\n"
+        << "[CAL] commands: base <ticks>, lower <ticks>, upper <ticks>, grip <ticks>\n"
+        << "[CAL] nudges: base +5, base -5, grip +10, ...\n"
+        << "[CAL] mark: mark <joint> <-90|0|+90>\n"
+        << "[CAL] extras: home, status, summary, write [path], help\n"
+        << "[CAL] quit: Ctrl+C or type 'exit'\n";
+
+    if (!motion_controller_.initialise(kDefaultI2cDevicePath,
+                                       kDefaultPca9685Address,
+                                       kDefaultPwmFrequencyHz,
+                                       kMotionChannelMap)) {
+        std::cerr << "[CAL] init failed: "
+                  << motion_controller_.lastErrorString() << std::endl;
+        return 1;
+    }
+
+    auto fail = [&](const std::string& message) {
+        std::cerr << "[CAL] " << message << std::endl;
+        motion_controller_.shutdown();
+        return 1;
+    };
+
+    bool home_clamped = false;
+    MeArmJointTargets current_targets =
+        makeSmokeTargets(kSmokeHomePose, home_clamped);
+
+    if (!motion_controller_.setTargets(current_targets)) {
+        return fail(std::string("failed to stage home pulse set: ") +
+                    motion_controller_.lastErrorString());
+    }
+
+    if (!motion_controller_.enable()) {
+        return fail(std::string("failed to enable motion: ") +
+                    motion_controller_.lastErrorString());
+    }
+
+    std::array<JointCalibrationMarks, MotionController::kServoCount> marks{};
+    std::cout << "[CAL] home " << formatTargets(current_targets) << std::endl;
+
+    const auto previous_sigint = std::signal(SIGINT, handleInteractiveServoSignal);
+    const auto previous_sigterm = std::signal(SIGTERM, handleInteractiveServoSignal);
+    g_interactive_servo_stop_requested = 0;
+
+    auto restoreSignals = [&]() {
+        std::signal(SIGINT, previous_sigint);
+        std::signal(SIGTERM, previous_sigterm);
+    };
+
+    auto applyTargets = [&](const MeArmJointTargets& requested,
+                            const std::string& label) -> bool {
+        MeArmJointTargets bounded = requested;
+        bool clamped = false;
+        bounded.base_ticks = clampPulseTicks(static_cast<int>(requested.base_ticks), clamped);
+        bounded.lower_ticks = clampPulseTicks(static_cast<int>(requested.lower_ticks), clamped);
+        bounded.upper_ticks = clampPulseTicks(static_cast<int>(requested.upper_ticks), clamped);
+        bounded.gripper_ticks = clampPulseTicks(static_cast<int>(requested.gripper_ticks), clamped);
+
+        if (!motion_controller_.setTargets(bounded)) {
+            (void)fail(std::string("failed to set ") + label + ": " +
+                       motion_controller_.lastErrorString());
+            return false;
+        }
+
+        current_targets = bounded;
+        std::cout << "[CAL] " << label << " " << formatTargets(current_targets);
+        if (clamped) {
+            std::cout << " [clamped]";
+        }
+        std::cout << std::endl;
+        return true;
+    };
+
+    auto writeSummaryToFile = [&](const std::string& path) -> bool {
+        std::ofstream out(path);
+        if (!out.is_open()) {
+            std::cerr << "[CAL] write failed: " << path << std::endl;
+            return false;
+        }
+        out << buildCalibrationSummary(marks);
+        out.close();
+        std::cout << "[CAL] wrote " << path << std::endl;
+        return true;
+    };
+
+    while (!g_interactive_servo_stop_requested) {
+        std::cout << "cal> " << std::flush;
+
+        std::string line;
+        if (!std::getline(std::cin, line)) {
+            if (g_interactive_servo_stop_requested || std::cin.eof()) {
+                break;
+            }
+            restoreSignals();
+            return fail("stdin read failed");
+        }
+
+        std::istringstream iss(line);
+        std::string command;
+        if (!(iss >> command)) {
+            continue;
+        }
+
+        command = toLowerCopy(command);
+        if (command == "exit" || command == "quit") {
+            break;
+        }
+
+        if (command == "help") {
+            std::cout
+                << "[CAL] commands: <joint> <ticks>, <joint> +/-<delta>, mark <joint> <-90|0|+90>, home, status, summary, write [path], exit"
+                << std::endl;
+            continue;
+        }
+
+        if (command == "home") {
+            bool clamped = false;
+            const MeArmJointTargets home_targets =
+                makeSmokeTargets(kSmokeHomePose, clamped);
+            if (!applyTargets(home_targets, "home")) {
+                restoreSignals();
+                return 1;
+            }
+            continue;
+        }
+
+        if (command == "status") {
+            std::cout << "[CAL] " << formatTargets(current_targets) << std::endl;
+            for (std::size_t i = 0; i < marks.size(); ++i) {
+                std::cout << "[CAL] " << formatCalibrationMarks(i, marks[i])
+                          << std::endl;
+            }
+            continue;
+        }
+
+        if (command == "summary") {
+            std::cout << buildCalibrationSummary(marks);
+            continue;
+        }
+
+        if (command == "write") {
+            std::string path;
+            if (!(iss >> path)) {
+                path = "config/servo_calibration_latest.txt";
+            }
+            (void)writeSummaryToFile(path);
+            continue;
+        }
+
+        if (command == "mark") {
+            std::string joint_name;
+            std::string point_name;
+            if (!(iss >> joint_name >> point_name)) {
+                std::cout << "[CAL] expected: mark <joint> <-90|0|+90>" << std::endl;
+                continue;
+            }
+
+            std::size_t joint_index = 0;
+            if (!smokeJointIndexFromName(joint_name, joint_index)) {
+                std::cout << "[CAL] unknown joint: " << joint_name << std::endl;
+                continue;
+            }
+
+            const char* point_label = nullptr;
+            int nominal_degrees = 0;
+            if (!parseCalibrationPoint(point_name, point_label, nominal_degrees)) {
+                std::cout << "[CAL] unknown calibration point: " << point_name
+                          << std::endl;
+                continue;
+            }
+
+            JointCalibrationMarks& joint_marks = marks[joint_index];
+            const std::uint16_t current_ticks = pulseForJoint(current_targets, joint_index);
+            if (nominal_degrees < 0) {
+                joint_marks.has_neg90 = true;
+                joint_marks.neg90_ticks = current_ticks;
+            } else if (nominal_degrees > 0) {
+                joint_marks.has_pos90 = true;
+                joint_marks.pos90_ticks = current_ticks;
+            } else {
+                joint_marks.has_zero = true;
+                joint_marks.zero_ticks = current_ticks;
+            }
+
+            std::cout << "[CAL] marked " << smokeJointIndexToString(joint_index)
+                      << " " << point_label << "=" << current_ticks << std::endl;
+            continue;
+        }
+
+        std::size_t joint_index = 0;
+        if (!smokeJointIndexFromName(command, joint_index)) {
+            std::cout << "[CAL] unknown command or joint: " << command << std::endl;
+            continue;
+        }
+
+        std::string value_text;
+        if (!(iss >> value_text)) {
+            std::cout << "[CAL] expected: <joint> <ticks>" << std::endl;
+            continue;
+        }
+
+        int raw_value = 0;
+        try {
+            std::size_t parsed = 0;
+            raw_value = std::stoi(value_text, &parsed);
+            if (parsed != value_text.size()) {
+                throw std::invalid_argument("trailing characters");
+            }
+        } catch (const std::exception&) {
+            std::cout << "[CAL] invalid tick value: " << value_text << std::endl;
+            continue;
+        }
+
+        MeArmJointTargets requested = current_targets;
+        const int requested_ticks =
+            static_cast<int>(pulseForJoint(current_targets, joint_index)) + 0;
+        bool value_clamped = false;
+        if (!value_text.empty() && (value_text[0] == '+' || value_text[0] == '-')) {
+            setPulseForJoint(requested,
+                             joint_index,
+                             clampPulseTicks(requested_ticks + raw_value,
+                                             value_clamped));
+        } else {
+            setPulseForJoint(requested,
+                             joint_index,
+                             clampPulseTicks(raw_value, value_clamped));
+        }
+
+        std::ostringstream label;
+        label << smokeJointIndexToString(joint_index) << "="
+              << pulseForJoint(requested, joint_index);
+        if (!applyTargets(requested, label.str())) {
+            restoreSignals();
+            return 1;
+        }
+    }
+
+    restoreSignals();
+    std::cout << buildCalibrationSummary(marks);
+    motion_controller_.shutdown();
+    std::cout << "[CAL] done" << std::endl;
+    return 0;
 }
 
 int AppController::runInteractiveServoConsole() {

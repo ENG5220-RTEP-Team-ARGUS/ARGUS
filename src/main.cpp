@@ -12,6 +12,7 @@ void printUsage(const char* program_name) {
         << "  " << program_name << "                Run Guardian FSM scenario demo\n"
         << "  " << program_name << " --button-test\n"
         << "  " << program_name << " --full-demo [options]\n"
+        << "  " << program_name << " --servo-calibrate\n"
         << "  " << program_name << " --servo-console\n"
         << "  " << program_name << " --motion-home\n"
         << "  " << program_name << " --motion-smoke-test [options]\n"
@@ -19,6 +20,7 @@ void printUsage(const char* program_name) {
         << "\nOptions:\n"
         << "  --button-test             Run a GPIO button diagnostic loop\n"
         << "  --full-demo               Run the full pipeline demo (camera + vision + guardian + interlock + motion)\n"
+        << "  --servo-calibrate         Run an interactive raw-pulse calibration console\n"
         << "  --servo-console           Run an interactive servo console (for example: 'base 90')\n"
         << "  --motion-home             Move all joints to logical 0 / home and exit\n"
         << "  --motion-smoke-test       Run the motion-only servo smoke test (all joints by default)\n"
@@ -75,6 +77,7 @@ int main(int argc, char* argv[]) {
     bool run_button_test = false;
     bool run_live_test = false;
     bool run_full_demo = false;
+    bool run_servo_calibrate = false;
     bool run_servo_console = false;
     bool run_motion_home = false;
     bool run_motion_smoke_test = false;
@@ -102,6 +105,11 @@ int main(int argc, char* argv[]) {
 
         if (arg == "--full-demo") {
             run_full_demo = true;
+            continue;
+        }
+
+        if (arg == "--servo-calibrate") {
+            run_servo_calibrate = true;
             continue;
         }
 
@@ -162,20 +170,26 @@ int main(int argc, char* argv[]) {
 
     if ((run_button_test && run_live_test) ||
         (run_button_test && run_full_demo) ||
+        (run_button_test && run_servo_calibrate) ||
         (run_button_test && run_servo_console) ||
         (run_button_test && run_motion_home) ||
         (run_button_test && run_motion_smoke_test) ||
         (run_live_test && run_full_demo) ||
+        (run_live_test && run_servo_calibrate) ||
         (run_live_test && run_servo_console) ||
         (run_live_test && run_motion_home) ||
         (run_live_test && run_motion_smoke_test) ||
+        (run_full_demo && run_servo_calibrate) ||
         (run_full_demo && run_servo_console) ||
         (run_full_demo && run_motion_home) ||
         (run_full_demo && run_motion_smoke_test) ||
+        (run_servo_calibrate && run_servo_console) ||
+        (run_servo_calibrate && run_motion_home) ||
+        (run_servo_calibrate && run_motion_smoke_test) ||
         (run_servo_console && run_motion_home) ||
         (run_servo_console && run_motion_smoke_test) ||
         (run_motion_home && run_motion_smoke_test)) {
-        std::cerr << "Choose exactly one mode: --button-test, --full-demo, --live-test, --servo-console, --motion-home, or --motion-smoke-test."
+        std::cerr << "Choose exactly one mode: --button-test, --full-demo, --live-test, --servo-calibrate, --servo-console, --motion-home, or --motion-smoke-test."
                   << std::endl;
         printUsage(argv[0]);
         return 1;
@@ -191,6 +205,10 @@ int main(int argc, char* argv[]) {
     AppController app_controller;
     if (run_button_test) {
         return app_controller.runButtonTest();
+    }
+
+    if (run_servo_calibrate) {
+        return app_controller.runServoCalibration();
     }
 
     if (run_servo_console) {
