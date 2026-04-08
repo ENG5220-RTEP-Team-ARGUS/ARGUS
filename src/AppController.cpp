@@ -47,6 +47,7 @@ constexpr int kSmokeGripMinOffset = -90;
 constexpr int kSmokeGripMaxOffset = 90;
 constexpr int kSmokePositiveStep = 90;
 constexpr int kSmokeNegativeStep = -90;
+constexpr std::chrono::milliseconds kMotionHomeSettleDwell{2000};
 constexpr int kDemoFreezeBadFrameThreshold = 1;
 constexpr int kDemoRecoverGoodFrameThreshold = 3;
 constexpr std::chrono::milliseconds kDemoStepDwell{1000};
@@ -526,6 +527,50 @@ int AppController::runButtonTest() {
 
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
+}
+
+int AppController::runMotionHomePose() {
+    std::cout << "[HOME] setting all joints to 0" << std::endl;
+
+    if (!motion_controller_.initialise(kDefaultI2cDevicePath,
+                                       kDefaultPca9685Address,
+                                       kDefaultPwmFrequencyHz,
+                                       kMotionChannelMap)) {
+        std::cerr << "[HOME] init failed: "
+                  << motion_controller_.lastErrorString() << std::endl;
+        return 1;
+    }
+
+    auto fail = [&](const std::string& message) {
+        std::cerr << "[HOME] " << message << std::endl;
+        motion_controller_.shutdown();
+        return 1;
+    };
+
+    bool clamped = false;
+    const MeArmJointTargets home_targets =
+        makeSmokeTargets(kSmokeHomePose, clamped);
+
+    if (!motion_controller_.setTargets(home_targets)) {
+        return fail(std::string("failed to stage home pose: ") +
+                    motion_controller_.lastErrorString());
+    }
+
+    if (!motion_controller_.enable()) {
+        return fail(std::string("failed to enable motion: ") +
+                    motion_controller_.lastErrorString());
+    }
+
+    std::cout << "[HOME] pose=HOME wait=2s";
+    if (clamped) {
+        std::cout << " [clamped]";
+    }
+    std::cout << std::endl;
+    std::this_thread::sleep_for(kMotionHomeSettleDwell);
+
+    motion_controller_.shutdown();
+    std::cout << "[HOME] done" << std::endl;
+    return 0;
 }
 
 int AppController::runMotionSmokeTest(const MotionSmokeTestOptions& options) {

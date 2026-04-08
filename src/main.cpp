@@ -12,11 +12,13 @@ void printUsage(const char* program_name) {
         << "  " << program_name << "                Run Guardian FSM scenario demo\n"
         << "  " << program_name << " --button-test\n"
         << "  " << program_name << " --full-demo [options]\n"
+        << "  " << program_name << " --motion-home\n"
         << "  " << program_name << " --motion-smoke-test [options]\n"
         << "  " << program_name << " --live-test [options]\n"
         << "\nOptions:\n"
         << "  --button-test             Run a GPIO button diagnostic loop\n"
         << "  --full-demo               Run the full pipeline demo (camera + vision + guardian + interlock + motion)\n"
+        << "  --motion-home             Move all joints to logical 0 / home and exit\n"
         << "  --motion-smoke-test       Run the motion-only servo smoke test (all joints by default)\n"
         << "  --base                    Smoke-test only the base servo\n"
         << "  --lower                   Smoke-test only the lower servo\n"
@@ -71,6 +73,7 @@ int main(int argc, char* argv[]) {
     bool run_button_test = false;
     bool run_live_test = false;
     bool run_full_demo = false;
+    bool run_motion_home = false;
     bool run_motion_smoke_test = false;
     AppController::LiveTestOptions options;
     AppController::MotionSmokeTestOptions smoke_options;
@@ -96,6 +99,11 @@ int main(int argc, char* argv[]) {
 
         if (arg == "--full-demo") {
             run_full_demo = true;
+            continue;
+        }
+
+        if (arg == "--motion-home") {
+            run_motion_home = true;
             continue;
         }
 
@@ -146,11 +154,15 @@ int main(int argc, char* argv[]) {
 
     if ((run_button_test && run_live_test) ||
         (run_button_test && run_full_demo) ||
+        (run_button_test && run_motion_home) ||
         (run_button_test && run_motion_smoke_test) ||
         (run_live_test && run_full_demo) ||
+        (run_live_test && run_motion_home) ||
         (run_live_test && run_motion_smoke_test) ||
-        (run_full_demo && run_motion_smoke_test)) {
-        std::cerr << "Choose exactly one mode: --button-test, --full-demo, --live-test, or --motion-smoke-test."
+        (run_full_demo && run_motion_home) ||
+        (run_full_demo && run_motion_smoke_test) ||
+        (run_motion_home && run_motion_smoke_test)) {
+        std::cerr << "Choose exactly one mode: --button-test, --full-demo, --live-test, --motion-home, or --motion-smoke-test."
                   << std::endl;
         printUsage(argv[0]);
         return 1;
@@ -166,6 +178,10 @@ int main(int argc, char* argv[]) {
     AppController app_controller;
     if (run_button_test) {
         return app_controller.runButtonTest();
+    }
+
+    if (run_motion_home) {
+        return app_controller.runMotionHomePose();
     }
 
     if (run_motion_smoke_test) {

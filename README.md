@@ -229,7 +229,22 @@ This mode is meant to confirm:
 - each servo can move cleanly on its own
 - the arm returns to home after each sweep
 
-### 4) Physical button test
+### 4) Move all joints to home
+Moves all four joints to logical `0` / home, waits briefly for the arm to settle, then exits.
+
+```bash
+./scripts/set_home.sh
+```
+
+or directly:
+
+```bash
+./build/ARGUS --motion-home
+```
+
+This is the quickest way to send the arm back to its neutral position without running the smoke sweep.
+
+### 5) Physical button test
 Runs the GPIO-backed physical button module by itself:
 
 ```bash
@@ -242,7 +257,7 @@ or directly:
 sudo -E ./build/ARGUS --button-test
 ```
 
-### 5) Full pipeline hardware demo
+### 6) Full pipeline hardware demo
 Runs camera + vision + guardian + interlock + motion through the normal safety path:
 
 ```bash
