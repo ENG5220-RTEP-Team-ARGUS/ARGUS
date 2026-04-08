@@ -43,3 +43,6 @@
 
 #cmake build files
 build/
+
+# local compliance reference repos
+compliance/
