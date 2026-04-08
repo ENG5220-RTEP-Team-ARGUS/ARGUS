@@ -28,7 +28,7 @@ realtime/event-driven style shown in the Bernd Porr references.
 | Reference repo | Role for ARGUS | Current fit | Main gap | Planned action | Priority |
 | --- | --- | --- | --- | --- | --- |
 | `realtime_cpp_coding` | Compliance standard and design checklist | Partial | ARGUS still has polling-heavy control loops and ad hoc timing | Use as the top-level standard for all compliance decisions and document gaps against it | High |
-| `cppTimer` | Timer implementation candidate | Low | `src/AppController.cpp` still uses `std::this_thread::sleep_for(...)` for demo/smoke/home timing | Integrate as a tracked dependency and replace sleep-driven timing with timer callbacks | High |
+| `cppTimer` | Timer implementation candidate | Medium | `src/AppController.cpp` still uses `std::this_thread::sleep_for(...)` for demo/smoke/home timing | Adopt its `timerfd` model through a tracked local `RealtimeTimer` wrapper and replace sleep-driven timing with timer callbacks | High |
 | `libcamera2opencv` | Camera backend replacement candidate | Medium | `src/CameraCapture.cpp` still relies on OpenCV `VideoCapture` plus `libcamerify`/V4L2 handling | Add a backend boundary and migrate toward callback-based `libcamera2opencv` capture | High |
 | `cpp_event_callbacks` | Architectural guidance for event handoff | Medium | Top-level control still polls for button/camera/demo progression instead of receiving events | Refactor timer/frame/button flow toward callback-driven interfaces without redesigning the whole architecture | Medium |
 | `rpi_pwm` | Alternative PWM path | Not applicable to current design | ARGUS uses PCA9685 over I2C, not Pi PWM GPIO18/19 | Document as out of scope unless motion hardware is redesigned | Low |
@@ -51,6 +51,8 @@ Current compliance gaps:
 Compliance action:
 
 - replace sleep-driven periodic behavior with `cppTimer`
+- replace sleep-driven periodic behavior with the local `RealtimeTimer`
+  wrapper based on the same Linux `timerfd` primitive
 - move recurring events into explicit timer callbacks
 - keep `AppController` as orchestrator, but reduce loop-centric control
 
@@ -107,6 +109,11 @@ tracked approaches:
 
 ARGUS must not depend on untracked local clones in `compliance/`.
 
+For `cppTimer`, ARGUS has chosen the third option: a local tracked
+re-implementation of the needed `timerfd` behavior. This avoids pulling GPL
+code directly into the MIT-licensed project while still aligning with the same
+Linux realtime primitive and callback model.
+
 ## Compliance Phases
 
 ### Phase 1: baseline documentation
@@ -117,7 +124,7 @@ ARGUS must not depend on untracked local clones in `compliance/`.
 
 ### Phase 2: timer compliance
 
-- integrate `cppTimer`
+- integrate the local tracked `RealtimeTimer` wrapper
 - remove important `sleep_for(...)` usage from `AppController`
 - convert demo/smoke/home pacing to timer-driven callbacks
 

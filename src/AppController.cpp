@@ -3,15 +3,18 @@
 #include "CameraCapture.hpp"
 #include "GuardianStateMachine.hpp"
 #include "PhysicalButtonModule.hpp"
+#include "RealtimeTimer.hpp"
 #include "RobotInterlock.hpp"
 #include "VisionProcessor.hpp"
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cctype>
 #include <chrono>
 #include <csignal>
 #include <cmath>
+#include <condition_variable>
 #include <cstdint>
 #include <exception>
 #include <iomanip>
@@ -69,6 +72,7 @@ constexpr int kDemoBaseStep = 60;
 constexpr int kDemoLowerStep = 60;
 constexpr int kDemoUpperStep = 60;
 constexpr int kDemoGripStep = 60;
+constexpr std::chrono::milliseconds kCaptureRetryBackoff{50};
 
 class MotionControllerHardwareAdapter final : public RobotHardware {
 public:
@@ -100,6 +104,33 @@ private:
 
 void handleInteractiveServoSignal(int) {
     g_interactive_servo_stop_requested = 1;
+}
+
+bool waitForRealtimeDelay(std::chrono::nanoseconds delay,
+                          std::string& error_message) {
+    if (delay.count() <= 0) {
+        error_message.clear();
+        return true;
+    }
+
+    std::mutex mutex;
+    std::condition_variable condition;
+    bool fired = false;
+
+    RealtimeTimer timer;
+    if (!timer.startOneShot(delay, [&]() {
+            std::lock_guard<std::mutex> lock(mutex);
+            fired = true;
+            condition.notify_one();
+        })) {
+        error_message = timer.lastErrorString();
+        return false;
+    }
+
+    std::unique_lock<std::mutex> lock(mutex);
+    condition.wait(lock, [&]() { return fired; });
+    error_message.clear();
+    return true;
 }
 
 double computeFocusScore(const cv::Mat& image) {
@@ -1162,7 +1193,11 @@ int AppController::runMotionHomePose() {
         std::cout << " [clamped]";
     }
     std::cout << std::endl;
-    std::this_thread::sleep_for(kMotionHomeSettleDwell);
+
+    std::string timer_error;
+    if (!waitForRealtimeDelay(kMotionHomeSettleDwell, timer_error)) {
+        return fail(std::string("home dwell timer failed: ") + timer_error);
+    }
 
     motion_controller_.shutdown();
     std::cout << "[HOME] done" << std::endl;
@@ -1234,7 +1269,11 @@ int AppController::runMotionSmokeTest(const MotionSmokeTestOptions& options) {
         }
         std::cout << std::endl;
         std::cout << "[SMOKE] wait 3s" << std::endl;
-        std::this_thread::sleep_for(kSmokeStepDwell);
+
+        std::string timer_error;
+        if (!waitForRealtimeDelay(kSmokeStepDwell, timer_error)) {
+            return fail(std::string("smoke dwell timer failed: ") + timer_error);
+        }
         return 0;
     };
 
@@ -1254,7 +1293,13 @@ int AppController::runMotionSmokeTest(const MotionSmokeTestOptions& options) {
 
     std::cout << "[SMOKE] all -> 0" << std::endl;
     std::cout << "[SMOKE] wait 3s" << std::endl;
-    std::this_thread::sleep_for(kSmokeStepDwell);
+    {
+        std::string timer_error;
+        if (!waitForRealtimeDelay(kSmokeStepDwell, timer_error)) {
+            return fail(std::string("initial smoke dwell timer failed: ") +
+                        timer_error);
+        }
+    }
 
     const SmokeJointRunPlan plan = makeSmokeJointRunPlan(options.joint);
     if (plan.count == 0) {
@@ -1363,8 +1408,8 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
     bool home_pose_staged = false;
     std::string current_pose_name = "NONE";
     std::size_t next_step_index = 0;
-    std::chrono::steady_clock::time_point next_step_due =
-        std::chrono::steady_clock::now();
+    RealtimeTimer demo_step_timer;
+    std::atomic<bool> demo_step_due{false};
 
     auto fail = [&](const std::string& message) {
         std::cerr << "[DEMO] " << message << std::endl;
@@ -1388,6 +1433,23 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
             std::cout << " [clamped]";
         }
         std::cout << " wait=1s" << std::endl;
+        return true;
+    };
+
+    auto stopDemoStepTimer = [&]() {
+        demo_step_timer.stop();
+        demo_step_due.store(false, std::memory_order_relaxed);
+    };
+
+    auto startDemoStepTimer = [&]() -> bool {
+        demo_step_due.store(false, std::memory_order_relaxed);
+        if (!demo_step_timer.startPeriodic(
+                kDemoStepDwell,
+                [&]() { demo_step_due.store(true, std::memory_order_relaxed); })) {
+            (void)fail(std::string("demo step timer failed: ") +
+                       demo_step_timer.lastErrorString());
+            return false;
+        }
         return true;
     };
 
@@ -1424,12 +1486,15 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
             return false;
         }
 
+        if (!startDemoStepTimer()) {
+            return false;
+        }
+
         demo_armed = true;
         motion_gate_open = true;
         waiting_for_ack = false;
         waiting_for_ack_announced = false;
         next_step_index = 0;
-        next_step_due = std::chrono::steady_clock::now() + kDemoStepDwell;
         std::cout << "[DEMO] ARM accepted -> running" << std::endl;
         return true;
     };
@@ -1478,6 +1543,7 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
     };
 
     guardian.setOnFreezeCallback([&]() {
+        stopDemoStepTimer();
         motion_gate_open = false;
         waiting_for_ack = false;
         waiting_for_ack_announced = false;
@@ -1498,8 +1564,12 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
             return;
         }
 
+        if (!startDemoStepTimer()) {
+            motion_faulted = true;
+            return;
+        }
+
         motion_gate_open = true;
-        next_step_due = std::chrono::steady_clock::now() + kDemoStepDwell;
         std::cout << "[DEMO] resume" << std::endl;
     });
 
@@ -1544,7 +1614,7 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
             return true;
         }
 
-        if (std::chrono::steady_clock::now() < next_step_due) {
+        if (!demo_step_due.exchange(false, std::memory_order_relaxed)) {
             return true;
         }
 
@@ -1554,7 +1624,6 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
         }
 
         next_step_index = (next_step_index + 1) % kDemoSequence.size();
-        next_step_due = std::chrono::steady_clock::now() + kDemoStepDwell;
         return true;
     };
 
@@ -1581,7 +1650,13 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
                 break;
             }
 
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            std::string timer_error;
+            if (!waitForRealtimeDelay(kCaptureRetryBackoff, timer_error)) {
+                motion_faulted = true;
+                std::cerr << "[DEMO] retry timer failed: " << timer_error
+                          << std::endl;
+                break;
+            }
             continue;
         }
 
@@ -1742,6 +1817,7 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
     }
 
     cv::destroyWindow(kDemoWindowName);
+    stopDemoStepTimer();
     motion_controller_.shutdown();
 
     if (!processed_any_frame) {
@@ -1960,7 +2036,13 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
                 break;
             }
 
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            std::string timer_error;
+            if (!waitForRealtimeDelay(kCaptureRetryBackoff, timer_error)) {
+                motion_faulted = true;
+                std::cerr << "[LIVE_TEST] retry timer failed: " << timer_error
+                          << std::endl;
+                break;
+            }
             continue;
         }
 

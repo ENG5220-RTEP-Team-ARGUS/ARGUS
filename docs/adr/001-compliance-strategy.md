@@ -34,7 +34,7 @@ ARGUS will adopt the Bernd Porr references in four different ways, depending on
 their role:
 
 1. `realtime_cpp_coding` is the compliance standard.
-2. `cppTimer` is the first code integration target.
+2. `cppTimer` is the first behavior-level integration target.
 3. `libcamera2opencv` is the preferred future camera backend for Raspberry Pi.
 4. `cpp_event_callbacks` is architectural guidance for event handoff.
 5. `rpi_pwm` is out of scope for the current PCA9685-based design.
@@ -84,6 +84,11 @@ one of these methods:
 This avoids hidden local dependencies and makes the compliance work reproducible
 for reviewers and CI.
 
+For the timer work, ARGUS will not vendor `cppTimer` directly because the local
+reference carries GPL licensing while ARGUS is MIT-licensed. Instead, ARGUS
+will re-implement the needed `timerfd` callback behavior locally in a tracked
+wrapper.
+
 ## Implementation Plan
 
 ### Step 1: document the baseline
@@ -106,6 +111,7 @@ Reason:
 Expected work:
 
 - integrate `cppTimer` using a tracked dependency strategy
+- use the local tracked `RealtimeTimer` wrapper as the chosen strategy
 - replace important `sleep_for(...)` timing in:
   - motion-home mode
   - motion smoke test

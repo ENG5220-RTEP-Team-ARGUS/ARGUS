@@ -5,10 +5,12 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(OpenCV REQUIRED)
+find_package(Threads REQUIRED)
 
 add_executable(ARGUS
     src/main.cpp
     src/AppController.cpp
+    src/RealtimeTimer.cpp
     src/GuardianStateMachine.cpp
     src/VisionProcessor.cpp
     src/CameraCapture.cpp
@@ -24,4 +26,5 @@ target_include_directories(ARGUS PRIVATE
 
 target_link_libraries(ARGUS
     ${OpenCV_LIBS}
+    Threads::Threads
 )
