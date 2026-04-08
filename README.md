@@ -407,17 +407,17 @@ sudo -E ./build/ARGUS --full-demo --camera-index 0 --expected-marker-id 23
 ```
 
 Current full demo dance:
-- `BASE +60`
-- `BASE -60`
+- `BASE +45`
+- `BASE -45`
 - `HOME`
-- `LOWER +60`
-- `LOWER -60`
+- `LOWER +45`
+- `LOWER -45`
 - `HOME`
-- `UPPER +60`
-- `UPPER -60`
+- `UPPER +45`
+- `UPPER -45`
 - `HOME`
-- `GRIP +60`
-- `GRIP -60`
+- `GRIP +45`
+- `GRIP -45`
 - `HOME`
 
 Live-test controls:
