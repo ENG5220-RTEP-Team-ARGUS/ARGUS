@@ -272,7 +272,9 @@ public:
             return false;
         }
 
+        const auto steady_now = std::chrono::steady_clock::now();
         const auto now = std::chrono::system_clock::now();
+        output_event.capture_timestamp = steady_now;
         output_event.timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                         now.time_since_epoch())
                                         .count();
@@ -306,6 +308,7 @@ public:
                                         const libcamera::ControlList&) {
             std::lock_guard<std::mutex> lock(mutex_);
             latest_frame_ = normaliseCapturedFrame(frame);
+            latest_capture_timestamp_ = std::chrono::steady_clock::now();
             const auto now = std::chrono::system_clock::now();
             latest_timestamp_ms_ =
                 std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -359,6 +362,7 @@ public:
         }
 
         output_event.image_data = latest_frame_.clone();
+        output_event.capture_timestamp = latest_capture_timestamp_;
         output_event.timestamp_ms = latest_timestamp_ms_;
         delivered_sequence_ = frame_sequence_;
         return !output_event.image_data.empty();
@@ -393,6 +397,7 @@ private:
     std::condition_variable condition_;
     cv::Mat latest_frame_;
     long long latest_timestamp_ms_{0};
+    std::chrono::steady_clock::time_point latest_capture_timestamp_{};
     std::uint64_t frame_sequence_{0};
     std::uint64_t delivered_sequence_{0};
     bool open_{false};

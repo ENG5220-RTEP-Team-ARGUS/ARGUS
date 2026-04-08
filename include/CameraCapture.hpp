@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <opencv2/opencv.hpp>
 #include <memory>
 #include <string>
@@ -8,6 +9,7 @@
 struct FrameEvent {
     cv::Mat image_data;
     long long timestamp_ms;
+    std::chrono::steady_clock::time_point capture_timestamp;
 };
 
 class CameraCaptureBackend;

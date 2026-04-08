@@ -622,6 +622,15 @@ command latency unless external measurement hardware is added.
 - live test freezes after `30` consecutive bad frames and recovers after `3` good frames
 - full demo freezes after `1` bad frame and recovers after `3` good frames
 - live test shows focus score and safety overlays to support setup and debugging
+- live test and full demo now show these software-side latency values directly in the GUI:
+  - `vision_us`
+  - `unsafe_detect_ms`
+  - `freeze_pipeline_ms`
+  - `freeze_cmd_ms`
+  - `total_stop_ms`
+  - `ack_to_resume_ms`
+- `safe_again_ms` and `total_recovery_ms` are still part of the design discussion,
+  but are not yet surfaced in the runtime overlay
 
 ---
 

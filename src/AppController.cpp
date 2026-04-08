@@ -21,6 +21,7 @@
 #include <iostream>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -175,6 +176,67 @@ std::string formatFocusScore(double focus_score) {
     std::ostringstream oss;
     oss << std::fixed << std::setprecision(1) << focus_score;
     return oss.str();
+}
+
+struct RuntimeLatencyMetrics {
+    long long vision_us = 0;
+    std::optional<long long> unsafe_detect_ms;
+    std::optional<long long> freeze_pipeline_ms;
+    std::optional<long long> freeze_cmd_ms;
+    std::optional<long long> total_stop_ms;
+    std::optional<long long> ack_to_resume_ms;
+};
+
+long long elapsedMilliseconds(std::chrono::steady_clock::time_point from,
+                              std::chrono::steady_clock::time_point to) {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(to - from)
+        .count();
+}
+
+std::string formatLatencyMilliseconds(const std::optional<long long>& value) {
+    return value.has_value() ? std::to_string(*value) : "N/A";
+}
+
+void drawLatencyOverlay(cv::Mat& frame,
+                        const RuntimeLatencyMetrics& metrics,
+                        int start_y) {
+    constexpr int kX = 16;
+    constexpr int kSpacing = 24;
+    constexpr double kFontScale = 0.55;
+    const cv::Scalar label_color(200, 200, 200);
+    const cv::Scalar value_color(255, 255, 255);
+
+    cv::putText(frame,
+                "LATENCY: vision_us=" + std::to_string(metrics.vision_us) +
+                    " unsafe_detect_ms=" +
+                    formatLatencyMilliseconds(metrics.unsafe_detect_ms),
+                cv::Point(kX, start_y),
+                cv::FONT_HERSHEY_SIMPLEX,
+                kFontScale,
+                label_color,
+                1);
+
+    cv::putText(frame,
+                "FREEZE: pipeline_ms=" +
+                    formatLatencyMilliseconds(metrics.freeze_pipeline_ms) +
+                    " cmd_ms=" +
+                    formatLatencyMilliseconds(metrics.freeze_cmd_ms) +
+                    " total_stop_ms=" +
+                    formatLatencyMilliseconds(metrics.total_stop_ms),
+                cv::Point(kX, start_y + kSpacing),
+                cv::FONT_HERSHEY_SIMPLEX,
+                kFontScale,
+                value_color,
+                1);
+
+    cv::putText(frame,
+                "RESUME: ack_to_resume_ms=" +
+                    formatLatencyMilliseconds(metrics.ack_to_resume_ms),
+                cv::Point(kX, start_y + 2 * kSpacing),
+                cv::FONT_HERSHEY_SIMPLEX,
+                kFontScale,
+                value_color,
+                1);
 }
 
 const char* safetyStateToString(SafetyState state) {
@@ -1495,6 +1557,12 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
     CppTimerCallback demo_step_timer;
     std::atomic<bool> demo_step_due{false};
     bool demo_step_timer_started = false;
+    RuntimeLatencyMetrics latency_metrics;
+    std::optional<std::chrono::steady_clock::time_point>
+        pending_unsafe_capture_timestamp;
+    std::optional<std::chrono::steady_clock::time_point>
+        pending_unsafe_decision_timestamp;
+    std::optional<std::chrono::steady_clock::time_point> ack_request_timestamp;
 
     auto fail = [&](const std::string& message) {
         std::cerr << "[DEMO] " << message << std::endl;
@@ -1592,6 +1660,9 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
         motion_gate_open = true;
         waiting_for_ack = false;
         waiting_for_ack_announced = false;
+        ack_request_timestamp.reset();
+        pending_unsafe_capture_timestamp.reset();
+        pending_unsafe_decision_timestamp.reset();
         next_step_index = 0;
         std::cout << "[DEMO] ARM accepted -> running" << std::endl;
         return true;
@@ -1617,6 +1688,7 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
         interlock.operatorAcknowledge();
         waiting_for_ack = false;
         waiting_for_ack_announced = false;
+        ack_request_timestamp = std::chrono::steady_clock::now();
         std::cout << "[DEMO] ACK accepted -> recovery" << std::endl;
         return interlock.state() != InterlockState::FAULT;
     };
@@ -1641,6 +1713,13 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
     };
 
     guardian.setOnFreezeCallback([&]() {
+        const auto freeze_callback_start = std::chrono::steady_clock::now();
+        if (pending_unsafe_decision_timestamp.has_value()) {
+            latency_metrics.freeze_pipeline_ms = elapsedMilliseconds(
+                *pending_unsafe_decision_timestamp,
+                freeze_callback_start);
+        }
+
         motion_gate_open = false;
         waiting_for_ack = false;
         waiting_for_ack_announced = false;
@@ -1649,6 +1728,17 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
                   << freezeReasonToString(pending_reason) << std::endl;
 
         interlock.onControlEvent(ControlEvent::FREEZE_NOW, pending_reason);
+        const auto freeze_callback_end = std::chrono::steady_clock::now();
+        latency_metrics.freeze_cmd_ms = elapsedMilliseconds(
+            freeze_callback_start,
+            freeze_callback_end);
+        if (pending_unsafe_capture_timestamp.has_value()) {
+            latency_metrics.total_stop_ms = elapsedMilliseconds(
+                *pending_unsafe_capture_timestamp,
+                freeze_callback_end);
+        }
+        pending_unsafe_capture_timestamp.reset();
+        pending_unsafe_decision_timestamp.reset();
         if (interlock.state() == InterlockState::FAULT) {
             motion_faulted = true;
         }
@@ -1656,6 +1746,13 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
 
     guardian.setOnClearFreezeCallback([&]() {
         interlock.onControlEvent(ControlEvent::ALLOW_MOTION);
+        const auto resume_callback_end = std::chrono::steady_clock::now();
+        if (ack_request_timestamp.has_value()) {
+            latency_metrics.ack_to_resume_ms = elapsedMilliseconds(
+                *ack_request_timestamp,
+                resume_callback_end);
+        }
+        ack_request_timestamp.reset();
         if (interlock.state() == InterlockState::FAULT) {
             motion_faulted = true;
             return;
@@ -1755,9 +1852,10 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
         consecutive_capture_failures = 0;
         processed_any_frame = true;
 
-        const auto now = std::chrono::steady_clock::now();
         const SafetyResult result =
-            vision_processor.process(frame_event.image_data, now);
+            vision_processor.process(frame_event.image_data,
+                                     frame_event.capture_timestamp);
+        latency_metrics.vision_us = result.processing_time.count();
 
         current_vision_state = result.state;
         scene_is_safe = (current_vision_state == SafetyState::SAFE);
@@ -1766,6 +1864,21 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
         }
 
         const GuardianState guardian_state_before_update = guardian.getState();
+        if (demo_armed &&
+            guardian_state_before_update == GuardianState::SAFE_MONITORING) {
+            if (!scene_is_safe) {
+                if (!pending_unsafe_capture_timestamp.has_value()) {
+                    pending_unsafe_capture_timestamp = frame_event.capture_timestamp;
+                    pending_unsafe_decision_timestamp = result.timestamp;
+                    latency_metrics.unsafe_detect_ms = elapsedMilliseconds(
+                        frame_event.capture_timestamp,
+                        result.timestamp);
+                }
+            } else {
+                pending_unsafe_capture_timestamp.reset();
+                pending_unsafe_decision_timestamp.reset();
+            }
+        }
         if (demo_armed &&
             (guardian_state_before_update == GuardianState::SAFE_MONITORING ||
              guardian_state_before_update == GuardianState::RESET_PENDING)) {
@@ -1886,6 +1999,8 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
                     cv::Scalar(255, 255, 255),
                     2);
 
+        drawLatencyOverlay(display_frame, latency_metrics, 240);
+
         cv::imshow(kDemoWindowName, display_frame);
         const int key = cv::waitKey(1);
         if (key == 'q' || key == 'Q' || key == 27) {
@@ -1993,6 +2108,12 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
     std::atomic<bool> live_step_due{false};
     CppTimerCallback live_step_timer;
     bool live_step_timer_started = false;
+    RuntimeLatencyMetrics latency_metrics;
+    std::optional<std::chrono::steady_clock::time_point>
+        pending_unsafe_capture_timestamp;
+    std::optional<std::chrono::steady_clock::time_point>
+        pending_unsafe_decision_timestamp;
+    std::optional<std::chrono::steady_clock::time_point> ack_request_timestamp;
 
     auto stagePose = [&](const DemoPoseStep& step) -> bool {
         bool clamped = false;
@@ -2110,16 +2231,40 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         interlock = std::make_unique<RobotInterlock>(hardware);
 
         guardian->setOnFreezeCallback([&]() {
+            const auto freeze_callback_start = std::chrono::steady_clock::now();
+            if (pending_unsafe_decision_timestamp.has_value()) {
+                latency_metrics.freeze_pipeline_ms = elapsedMilliseconds(
+                    *pending_unsafe_decision_timestamp,
+                    freeze_callback_start);
+            }
             motion_gate_open = false;
             waiting_for_ack = false;
             waiting_for_ack_announced = false;
             interlock->onControlEvent(ControlEvent::FREEZE_NOW, pending_reason);
+            const auto freeze_callback_end = std::chrono::steady_clock::now();
+            latency_metrics.freeze_cmd_ms = elapsedMilliseconds(
+                freeze_callback_start,
+                freeze_callback_end);
+            if (pending_unsafe_capture_timestamp.has_value()) {
+                latency_metrics.total_stop_ms = elapsedMilliseconds(
+                    *pending_unsafe_capture_timestamp,
+                    freeze_callback_end);
+            }
+            pending_unsafe_capture_timestamp.reset();
+            pending_unsafe_decision_timestamp.reset();
             std::cout << "[LIVE_TEST] freeze: "
                       << freezeReasonToString(pending_reason) << std::endl;
         });
 
         guardian->setOnClearFreezeCallback([&]() {
             interlock->onControlEvent(ControlEvent::ALLOW_MOTION);
+            const auto resume_callback_end = std::chrono::steady_clock::now();
+            if (ack_request_timestamp.has_value()) {
+                latency_metrics.ack_to_resume_ms = elapsedMilliseconds(
+                    *ack_request_timestamp,
+                    resume_callback_end);
+            }
+            ack_request_timestamp.reset();
             if (interlock->state() == InterlockState::FAULT) {
                 motion_faulted = true;
                 return;
@@ -2215,6 +2360,9 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         motion_gate_open = true;
         waiting_for_ack = false;
         waiting_for_ack_announced = false;
+        ack_request_timestamp.reset();
+        pending_unsafe_capture_timestamp.reset();
+        pending_unsafe_decision_timestamp.reset();
         std::cout << "[LIVE_TEST] ARM accepted: guardian enforcement is now ACTIVE."
                   << std::endl;
         return true;
@@ -2236,6 +2384,9 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         waiting_for_ack = false;
         waiting_for_ack_announced = false;
         home_pose_staged = false;
+        ack_request_timestamp.reset();
+        pending_unsafe_capture_timestamp.reset();
+        pending_unsafe_decision_timestamp.reset();
         next_routine_step_index = 0;
         current_pose_name = "HOLD";
         resetEnforcementState();
@@ -2267,6 +2418,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
 
         guardian->operatorAcknowledge();
         interlock->operatorAcknowledge();
+        ack_request_timestamp = std::chrono::steady_clock::now();
         std::cout << "[LIVE_TEST] Operator acknowledge requested." << std::endl;
         return true;
     };
@@ -2387,7 +2539,8 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
 
         const SafetyResult result =
             vision_processor.process(frame_event.image_data,
-                                     std::chrono::steady_clock::now());
+                                     frame_event.capture_timestamp);
+        latency_metrics.vision_us = result.processing_time.count();
         const double focus_score = computeFocusScore(frame_event.image_data);
         const char* focus_quality = focusQualityLabel(focus_score);
 
@@ -2401,6 +2554,22 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         std::string interlock_state_text = "DISARMED";
         std::string freeze_reason_text = "N/A";
 
+        const GuardianState guardian_state_before_update = guardian->getState();
+        if (guardian_armed &&
+            guardian_state_before_update == GuardianState::SAFE_MONITORING) {
+            if (!frame_is_safe) {
+                if (!pending_unsafe_capture_timestamp.has_value()) {
+                    pending_unsafe_capture_timestamp = frame_event.capture_timestamp;
+                    pending_unsafe_decision_timestamp = result.timestamp;
+                    latency_metrics.unsafe_detect_ms = elapsedMilliseconds(
+                        frame_event.capture_timestamp,
+                        result.timestamp);
+                }
+            } else {
+                pending_unsafe_capture_timestamp.reset();
+                pending_unsafe_decision_timestamp.reset();
+            }
+        }
         if (guardian_armed) {
             guardian->processFrame(frame_is_safe ? FrameStatus::FRAME_GOOD
                                                  : FrameStatus::FRAME_BAD);
@@ -2420,6 +2589,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
 
         if (guardian_armed && options.auto_ack &&
             guardian->getState() == GuardianState::FROZEN_UNSAFE) {
+            ack_request_timestamp = std::chrono::steady_clock::now();
             guardian->operatorAcknowledge();
             interlock->operatorAcknowledge();
             std::cout << "[LIVE_TEST] Operator acknowledge sent automatically"
@@ -2548,6 +2718,8 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
                     0.5,
                     cv::Scalar(200, 200, 200),
                     1);
+
+        drawLatencyOverlay(display_frame, latency_metrics, 300);
 
         cv::imshow(kLiveWindowName, display_frame);
         const int key = cv::waitKey(1);
