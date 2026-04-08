@@ -149,10 +149,25 @@ sudo apt update
 sudo apt install -y build-essential cmake pkg-config libopencv-dev libcamera-tools
 ```
 
+### Optional compliance camera backend packages
+If you want to build the optional `libcamera2opencv` backend:
+```bash
+sudo apt install -y libcamera-dev libturbojpeg0-dev
+```
+
+Then install `cam2opencv` separately and configure ARGUS with:
+```bash
+cmake -S . -B build -DARGUS_ENABLE_LIBCAMERA2OPENCV=ON
+cmake --build build -j$(nproc)
+```
+
 ### Setup notes for this branch
 - use `libcamerify` for Pi camera modes
 - full demo self-elevates with `sudo` because the physical button uses the GPIO character-device interface
 - the current default expected marker ID is `23`
+- when built with `ARGUS_ENABLE_LIBCAMERA2OPENCV=ON`, you can select the
+  callback-based camera backend with:
+  `ARGUS_CAMERA_BACKEND=libcamera2opencv`
 
 ---
 

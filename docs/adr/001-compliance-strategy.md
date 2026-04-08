@@ -35,8 +35,8 @@ their role:
 
 1. `realtime_cpp_coding` is the compliance standard.
 2. `cppTimer` is the first behavior-level integration target.
-3. `libcamera2opencv` is the preferred behavior/model reference for the future
-   Raspberry Pi camera backend.
+3. `libcamera2opencv` is the preferred optional external dependency for the
+   future Raspberry Pi camera backend.
 4. `cpp_event_callbacks` is architectural guidance for event handoff.
 5. `rpi_pwm` is out of scope for the current PCA9685-based design.
 
@@ -90,11 +90,9 @@ reference carries GPL licensing while ARGUS is MIT-licensed. Instead, ARGUS
 will re-implement the needed `timerfd` callback behavior locally in a tracked
 wrapper.
 
-The same rule applies to `libcamera2opencv`: ARGUS will not copy the local
-reference directly into the tree while licensing is unresolved against the
-current MIT project. The first step is a backend boundary inside
-`CameraCapture`, followed by a tracked dependency decision or a local
-re-implementation of the needed callback-based behavior.
+For `libcamera2opencv`, ARGUS will not copy the local reference directly into
+the tree. Instead, ARGUS will integrate it as an explicit optional external
+dependency behind `CameraCapture`.
 
 ## Implementation Plan
 
@@ -135,7 +133,8 @@ Expected work:
 
 - keep the `CameraCapture` abstraction
 - refactor its implementation so backend choice is internal
-- use that boundary to integrate a tracked callback-based Pi backend
+- use that boundary to integrate the tracked optional `libcamera2opencv`
+  backend
 - validate live-test and full-demo on the Pi using the new backend
 
 ### Step 4: reduce polling and strengthen event handoff

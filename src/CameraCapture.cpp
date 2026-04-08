@@ -2,13 +2,21 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cctype>
+#include <condition_variable>
+#include <cstdint>
 #include <cstdlib>
 #include <functional>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
+
+#if defined(ARGUS_HAVE_LIBCAM2OPENCV)
+#include <libcam2opencv.h>
+#endif
 
 namespace {
 
@@ -67,6 +75,57 @@ const char* backendPreferenceToString(CameraCapture::BackendPreference preferenc
             return "libcamera2opencv";
     }
     return "unknown";
+}
+
+CameraCapture::BackendPreference parseBackendPreference(const char* raw_value,
+                                                        bool* recognised = nullptr) {
+    if (recognised != nullptr) {
+        *recognised = true;
+    }
+
+    if (raw_value == nullptr) {
+        if (recognised != nullptr) {
+            *recognised = false;
+        }
+        return CameraCapture::BackendPreference::Auto;
+    }
+
+    std::string value(raw_value);
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+
+    if (value == "auto") {
+        return CameraCapture::BackendPreference::Auto;
+    }
+    if (value == "opencv" || value == "videocapture" || value == "opencvvideocapture") {
+        return CameraCapture::BackendPreference::OpenCvVideoCapture;
+    }
+    if (value == "libcamera2opencv" || value == "libcamera" ||
+        value == "cam2opencv") {
+        return CameraCapture::BackendPreference::Libcamera2OpenCv;
+    }
+
+    if (recognised != nullptr) {
+        *recognised = false;
+    }
+    return CameraCapture::BackendPreference::Auto;
+}
+
+CameraCapture::BackendPreference effectiveBackendPreference(
+    CameraCapture::BackendPreference requested_preference) {
+    if (requested_preference != CameraCapture::BackendPreference::Auto) {
+        return requested_preference;
+    }
+
+    bool recognised = false;
+    const auto env_preference =
+        parseBackendPreference(std::getenv("ARGUS_CAMERA_BACKEND"), &recognised);
+    if (recognised) {
+        return env_preference;
+    }
+
+    return CameraCapture::BackendPreference::Auto;
 }
 
 }  // namespace
@@ -212,9 +271,134 @@ private:
     cv::VideoCapture cap_;
 };
 
+#if defined(ARGUS_HAVE_LIBCAM2OPENCV)
+class Libcamera2OpenCvBackend final : public CameraCaptureBackend {
+public:
+    explicit Libcamera2OpenCvBackend(int camera_index) {
+        Libcam2OpenCVSettings settings;
+        settings.cameraIndex = static_cast<unsigned int>(std::max(camera_index, 0));
+        settings.width = 640;
+        settings.height = 480;
+        settings.framerate = 30;
+
+        camera_.registerCallback([this](const cv::Mat& frame,
+                                        const libcamera::ControlList&) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            latest_frame_ = frame.clone();
+            const auto now = std::chrono::system_clock::now();
+            latest_timestamp_ms_ =
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    now.time_since_epoch())
+                    .count();
+            ++frame_sequence_;
+            condition_.notify_one();
+        });
+
+        try {
+            camera_.start(settings);
+            open_ = true;
+            std::cout << "[CameraCapture] Opened via libcamera2opencv callback backend"
+                      << std::endl;
+        } catch (const std::exception& exception) {
+            last_error_ = exception.what();
+            std::cerr << "[CameraCapture] libcamera2opencv start failed: "
+                      << last_error_ << std::endl;
+            safeStop();
+        } catch (...) {
+            last_error_ = "unknown libcamera2opencv exception";
+            std::cerr << "[CameraCapture] libcamera2opencv start failed: "
+                      << last_error_ << std::endl;
+            safeStop();
+        }
+    }
+
+    ~Libcamera2OpenCvBackend() override {
+        safeStop();
+    }
+
+    bool isOpen() const noexcept override {
+        return open_;
+    }
+
+    bool waitForNextFrame(FrameEvent& output_event) override {
+        if (!open_) {
+            return false;
+        }
+
+        std::unique_lock<std::mutex> lock(mutex_);
+        const bool ready = condition_.wait_for(
+            lock,
+            std::chrono::milliseconds(2000),
+            [&]() { return frame_sequence_ > delivered_sequence_ || !open_; });
+
+        if (!ready || (!open_ && frame_sequence_ <= delivered_sequence_)) {
+            std::cerr << "WARNING: Empty frame captured (backend: libcamera2opencv)."
+                      << std::endl;
+            return false;
+        }
+
+        output_event.image_data = latest_frame_.clone();
+        output_event.timestamp_ms = latest_timestamp_ms_;
+        delivered_sequence_ = frame_sequence_;
+        return !output_event.image_data.empty();
+    }
+
+    std::string backendName() const override {
+        return open_ ? "LIBCAMERA2OPENCV" : "CLOSED";
+    }
+
+    std::string backendImplementation() const override {
+        return "libcamera2opencv";
+    }
+
+private:
+    void safeStop() noexcept {
+        if (open_) {
+            try {
+                camera_.stop();
+            } catch (...) {
+            }
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            open_ = false;
+        }
+        condition_.notify_all();
+    }
+
+    Libcam2OpenCV camera_;
+    mutable std::mutex mutex_;
+    std::condition_variable condition_;
+    cv::Mat latest_frame_;
+    long long latest_timestamp_ms_{0};
+    std::uint64_t frame_sequence_{0};
+    std::uint64_t delivered_sequence_{0};
+    bool open_{false};
+    std::string last_error_;
+};
+#endif
+
 std::unique_ptr<CameraCaptureBackend> makeCameraBackend(CameraCapture::Options options) {
-    switch (options.backend_preference) {
+    const auto effective_preference =
+        effectiveBackendPreference(options.backend_preference);
+    const bool libcamerify_active = isLibcamerifyActive();
+
+    switch (effective_preference) {
         case CameraCapture::BackendPreference::Auto:
+#if defined(ARGUS_HAVE_LIBCAM2OPENCV)
+            if (!libcamerify_active) {
+                auto backend =
+                    std::make_unique<Libcamera2OpenCvBackend>(options.camera_index);
+                if (backend->isOpen()) {
+                    return backend;
+                }
+                std::cerr << "[CameraCapture] libcamera2opencv backend unavailable; "
+                             "falling back to OpenCV VideoCapture."
+                          << std::endl;
+            }
+#endif
+            [[fallthrough]];
         case CameraCapture::BackendPreference::OpenCvVideoCapture: {
             auto backend = std::make_unique<OpenCvVideoCaptureBackend>(options.camera_index);
             if (backend->isOpen()) {
@@ -223,13 +407,33 @@ std::unique_ptr<CameraCaptureBackend> makeCameraBackend(CameraCapture::Options o
             return nullptr;
         }
         case CameraCapture::BackendPreference::Libcamera2OpenCv:
+#if defined(ARGUS_HAVE_LIBCAM2OPENCV)
+            if (libcamerify_active) {
+                std::cerr << "[CameraCapture] backend '"
+                          << backendPreferenceToString(effective_preference)
+                          << "' requested while libcamerify is active. "
+                             "Use the backend directly without libcamerify."
+                          << std::endl;
+                return nullptr;
+            }
+
+            {
+                auto backend =
+                    std::make_unique<Libcamera2OpenCvBackend>(options.camera_index);
+                if (backend->isOpen()) {
+                    return backend;
+                }
+                return nullptr;
+            }
+#else
             std::cerr << "[CameraCapture] requested backend '"
-                      << backendPreferenceToString(options.backend_preference)
-                      << "' is not integrated yet. "
-                         "CameraCapture now has a backend boundary, but the active "
-                         "implementation is still OpenCV VideoCapture."
+                      << backendPreferenceToString(effective_preference)
+                      << "' is not available in this build. "
+                         "Configure with -DARGUS_ENABLE_LIBCAMERA2OPENCV=ON "
+                         "after installing cam2opencv."
                       << std::endl;
             return nullptr;
+#endif
     }
     return nullptr;
 }
