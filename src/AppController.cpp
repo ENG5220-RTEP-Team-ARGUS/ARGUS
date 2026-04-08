@@ -2301,6 +2301,54 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
 
     cv::namedWindow(kLiveWindowName, cv::WINDOW_AUTOSIZE);
 
+    struct LiveStatusSnapshot {
+        bool guardian_armed = false;
+        bool scene_safe = false;
+        bool waiting_for_continue = false;
+        int routine_number = 0;
+        std::string vision_state;
+        std::string guardian_state;
+        std::string interlock_state;
+        std::string motion_controller_state;
+        std::string freeze_reason;
+    };
+
+    LiveStatusSnapshot last_live_status;
+    bool live_status_known = false;
+    auto maybeLogLiveStatus = [&](const LiveStatusSnapshot& snapshot) {
+        const bool changed =
+            !live_status_known ||
+            snapshot.guardian_armed != last_live_status.guardian_armed ||
+            snapshot.scene_safe != last_live_status.scene_safe ||
+            snapshot.waiting_for_continue !=
+                last_live_status.waiting_for_continue ||
+            snapshot.routine_number != last_live_status.routine_number ||
+            snapshot.vision_state != last_live_status.vision_state ||
+            snapshot.guardian_state != last_live_status.guardian_state ||
+            snapshot.interlock_state != last_live_status.interlock_state ||
+            snapshot.motion_controller_state !=
+                last_live_status.motion_controller_state ||
+            snapshot.freeze_reason != last_live_status.freeze_reason;
+        if (!changed) {
+            return;
+        }
+
+        std::cout << "[LIVE_TEST] status: armed="
+                  << (snapshot.guardian_armed ? "YES" : "NO")
+                  << " safe=" << (snapshot.scene_safe ? "YES" : "NO")
+                  << " waiting="
+                  << (snapshot.waiting_for_continue ? "YES" : "NO")
+                  << " routine=" << snapshot.routine_number
+                  << " vision=" << snapshot.vision_state
+                  << " guardian=" << snapshot.guardian_state
+                  << " interlock=" << snapshot.interlock_state
+                  << " motion_ctrl=" << snapshot.motion_controller_state
+                  << " freeze_reason=" << snapshot.freeze_reason << std::endl;
+
+        last_live_status = snapshot;
+        live_status_known = true;
+    };
+
     FrameEvent frame_event;
     std::uint64_t frame_index = 0;
     bool processed_any_frame = false;
@@ -2389,20 +2437,16 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
             freeze_reason_text = freezeReasonToString(interlock->freezeReason());
         }
 
-        std::cout << "[LIVE_TEST] frame=" << frame_index
-                  << " armed=" << (guardian_armed ? "YES" : "NO")
-                  << " can_arm=" << (frame_is_safe ? "YES" : "NO")
-                  << " vision=" << safetyStateToString(current_vision_state)
-                  << " routine=" << getLiveRoutineDefinition(selected_routine_index).number
-                  << " focus_score=" << formatFocusScore(focus_score)
-                  << " focus=" << focus_quality
-                  << " guardian=" << guardian_state_text
-                  << " interlock=" << interlock_state_text
-                  << " motion_ctrl="
-                  << motionControllerStateToString(motion_controller_.outputState())
-                  << " freeze_reason=" << freeze_reason_text
-                  << " processing_us=" << result.processing_time.count()
-                  << std::endl;
+        maybeLogLiveStatus(LiveStatusSnapshot{
+            guardian_armed,
+            frame_is_safe,
+            waiting_for_ack,
+            getLiveRoutineDefinition(selected_routine_index).number,
+            safetyStateToString(current_vision_state),
+            guardian_state_text,
+            interlock_state_text,
+            motionControllerStateToString(motion_controller_.outputState()),
+            freeze_reason_text});
 
         if (interlock->state() == InterlockState::FAULT) {
             motion_faulted = true;
