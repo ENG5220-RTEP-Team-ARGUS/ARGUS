@@ -185,12 +185,16 @@ void FormatConverter::start(const libcamera::PixelFormat format, int width, int 
 
 cv::Mat FormatConverter::convert(const std::vector<libcamera::Span<uint8_t>> &planes)
 {
-    switch (formatFamily_)
-    {
-    case NATIVE:
-        return cv::Mat(height_, width_, FormatConverter::openCVoutputFormat, planes[0].data());
-    case MJPEG:
-        return convertJPG(planes);
+	switch (formatFamily_)
+	{
+	case NATIVE:
+		return cv::Mat(height_,
+		               width_,
+		               FormatConverter::openCVoutputFormat,
+		               planes[0].data(),
+		               stride_);
+	case MJPEG:
+		return convertJPG(planes);
     case RGB:
         return convertRGB(planes);
     case YUVPacked:
