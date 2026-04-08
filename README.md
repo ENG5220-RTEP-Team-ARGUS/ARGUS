@@ -1,11 +1,11 @@
 # A.R.G.U.S.
-A.R.G.U.S. (Adaptive Real-time Guardian for Unsafe Situations) is a vision-based safety supervision layer for robotic manipulation workflows.
+A.R.G.U.S. (adaptive real-time guardian for unsafe situations) is a real-time, vision-based safety supervision layer for robotic manipulators. It continuously monitors the workspace, evaluates collision or interference risk under strict latency constraints, and triggers fail-safe interventions (e.g. hard stop) via event-driven control, prioritising deterministic response and safe interruption.
+
+This repository currently focuses on validating that safety supervision path on Raspberry Pi hardware with a camera, a PCA9685 servo controller, a MeArm, and a physical operator button.
 
 Current live-test pipeline:
 
 `AppController -> CameraCapture -> VisionProcessor -> GuardianStateMachine -> RobotInterlock -> MotionController`
-
-The project is currently focused on validating marker-based safety decisions in real camera tests on Raspberry Pi.
 
 ## What ARGUS does
 - Captures live camera frames.
@@ -43,6 +43,49 @@ cmake --build build -j$(nproc)
 ```
 
 If CMake fails with `Could not find OpenCVConfig.cmake`, install/configure OpenCV dev packages so `find_package(OpenCV REQUIRED)` works.
+
+## Hardware wiring cheat sheet
+### Raspberry Pi to PCA9685
+- Pi `3V3` -> PCA9685 `VCC`
+- Pi `GND` -> PCA9685 `GND`
+- Pi `GPIO2 / SDA1` (physical pin `3`) -> PCA9685 `SDA`
+- Pi `GPIO3 / SCL1` (physical pin `5`) -> PCA9685 `SCL`
+
+### Servo power
+- External `6V` battery pack -> MeArm board / servo power rail
+- PCA9685 ground, Pi ground, battery ground, and MeArm ground must all be shared
+- Do not power the servos from the Pi
+
+### PCA9685 to MeArm mapping
+- `channel 0` -> `base` -> MeArm `BASE`
+- `channel 4` -> `lower` -> MeArm `LEFT`
+- `channel 8` -> `upper` -> MeArm `RIGHT`
+- `channel 12` -> `grip` -> MeArm `CLAW`
+
+### Rear-view arm meaning
+- `base`: rotates the whole arm left/right
+- `lower`: left-side servo, raises/lowers the lower link
+- `upper`: right-side servo, bends/extends the upper link
+- `grip`: opens/closes the claw
+
+### Physical ACK button
+- BCM `GPIO24`, physical pin `18`
+- One side of the button -> `GPIO24`
+- Opposite side of the button -> `GND`
+- Active-low input with pull-up enabled
+- Place a 4-pin tactile button across the breadboard center gap
+- Do not wire `GPIO24` and `GND` to two legs on the same side of the tactile button
+
+### Camera ribbon
+- Use `CAM/DISP0` or `CAM/DISP1` on the Pi 5
+- Power the Pi off before plugging or unplugging the camera cable
+- On the Pi side, ribbon pads face away from the connector latch
+- On the camera side, ribbon pads face toward the camera PCB
+
+### Quick fault isolation
+- If all servos chatter together, check shared power and ground first
+- If only one joint misbehaves, check that servo's linkage, orientation, and signal wire
+- If the button state looks inverted or stuck, check the tactile button orientation first
 
 ## Run modes
 ### 1) Guardian FSM scenario demo
