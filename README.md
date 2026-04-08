@@ -185,6 +185,11 @@ All public classes and interfaces are documented using Doxygen.
 | Member 5 |  |
 
 ---
+## Project Management
+
+This project is tracked using GitHub Projects. Our project board tracks all issues, bugs and tasks across the team with clear division of labour and progress tracking.
+
+[View the ARGUS Project Board](https://github.com/orgs/ENG5220-RTEP-Team-ARGUS/projects/3)
 
 ## Acknowledgements
 
