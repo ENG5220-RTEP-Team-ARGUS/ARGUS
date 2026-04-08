@@ -101,19 +101,19 @@ The current branch validates that safety workflow on a small real arm using mark
 ### Controller
 | Component | Quantity | Cost (£) |
 |----------|---------|----------|
-| Raspberry Pi (Model TBD) | 1 | TBD |
+| Raspberry Pi 5 | 1 | Not tracked in repo |
 
 ### Sensors & Vision
 | Component | Quantity | Cost (£) |
 |----------|---------|----------|
-| Camera Module | 1 | TBD |
+| Raspberry Pi Camera Module | 1 | Not tracked in repo |
 
 ### Additional Components
 | Component | Quantity | Cost (£) |
 |----------|---------|----------|
-| Robotic Arm (Test Platform) | 1 | TBD |
+| MeArm test platform | 1 | Not tracked in repo |
 
-**Total Cost:** TBD
+**Total Cost:** Not tracked in the repository.
 
 ### Current validated bench hardware
 | Component | Quantity | Notes |
@@ -134,13 +134,14 @@ The current branch validates that safety workflow on a small real arm using mark
 - Linux (Raspberry Pi OS)
 - C++17+
 - CMake ≥ 3.10
-- OpenCV (if used)
-- libgpiod
+- OpenCV
+- pkg-config
+- libcamera runtime tools on the Pi
 
 ### Install Dependencies
 ```bash
 sudo apt update
-sudo apt install cmake libgpiod-dev
+sudo apt install -y build-essential cmake pkg-config libopencv-dev libcamera-tools
 ```
 
 ### Current validated Raspberry Pi packages
@@ -580,11 +581,7 @@ v4l2-ctl --list-formats-ext -d /dev/video0
 
 | Name | Contribution |
 |------|-------------|
-| Member 1 |  |
-| Member 2 |  |
-| Member 3 |  |
-| Member 4 |  |
-| Member 5 |  |
+| ARGUS team | System design, hardware integration, safety pipeline, motion control, and validation are reflected in the repository history and pull requests |
 
 ---
 
