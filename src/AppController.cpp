@@ -1854,9 +1854,7 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
                     2);
 
         cv::putText(display_frame,
-                    std::string("CONTROL: ") +
-                        (demo_armed ? "ARMED (space/a/r/button=continue)"
-                                    : "DISARMED (space/a/r/button=continue)") +
+                    std::string("CONTROL: space/button = control") +
                         " | READY_TO_ARM: " + (scene_is_safe ? "YES" : "NO"),
                     cv::Point(16, 120),
                     cv::FONT_HERSHEY_SIMPLEX,
@@ -2431,9 +2429,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
                     2);
 
         cv::putText(display_frame,
-                    std::string("CONTROL: ") +
-                        (guardian_armed ? "ARMED (space/a/r/button=single-control)"
-                                        : "DISARMED (space/a/r/button=single-control)") +
+                    std::string("CONTROL: space/button = control") +
                         " | CAN_ARM: " + (frame_is_safe ? "YES" : "NO"),
                     cv::Point(16, 120),
                     cv::FONT_HERSHEY_SIMPLEX,

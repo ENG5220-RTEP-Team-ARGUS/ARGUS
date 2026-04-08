@@ -546,11 +546,77 @@ build/               # out-of-tree build directory used by the validated flow
 
 ## Real-Time Design & Latency
 
-- Event-driven architecture (no polling)
-- Deterministic response times
-- Frame-based processing pipeline
+- Frame-based safety pipeline
+- Timer-driven control pacing via vendored `cppTimer`
+- Safety decisions and control transitions should be measured using
+  `std::chrono::steady_clock`
 
-> ⚠️ *Add measured latency results here*
+### Latency metrics that matter
+
+The main latency question in ARGUS is not just "how long does vision take?".
+It is "how long does it take to go from seeing an unsafe condition to sending
+the stop command?".
+
+Recommended software-side metrics:
+
+- `vision_us`
+  - Time spent inside `VisionProcessor::process()`.
+  - This is the pure vision-processing cost per frame.
+
+- `unsafe_detect_ms`
+  - Time from frame capture to the point where the system decides that frame is
+    unsafe.
+  - This is the first detection latency.
+
+- `freeze_pipeline_ms`
+  - Time from "unsafe decision made" to the guardian/interlock freeze callback
+    being triggered.
+  - This shows how much delay the software control path adds after vision has
+    already decided the scene is unsafe.
+
+- `freeze_cmd_ms`
+  - Time from entering the freeze callback to the motion stop command being sent
+    through `RobotInterlock` / `MotionController`.
+  - This is the software actuation latency.
+
+- `total_stop_ms`
+  - Time from capture of the first unsafe frame to the motion stop command being
+    issued.
+  - This is the main end-to-end software safety latency.
+
+Recovery-side metrics also matter:
+
+- `safe_again_ms`
+  - Time from the first good frame after freeze to the point where the system is
+    ready to recover.
+
+- `ack_to_resume_ms`
+  - Time from operator continue / acknowledge input to motion re-enable.
+
+- `total_recovery_ms`
+  - Time from first safe-again frame to motion re-enable.
+
+### Important limitation
+
+ARGUS can measure software-command latency, but not true physical stop latency.
+
+That means the current code can measure:
+- when the unsafe condition was detected
+- when freeze was commanded
+- when motion output was disabled or re-enabled in software
+
+It cannot directly measure:
+- the exact moment the servo horn physically stopped moving
+- the exact moment mechanical motion resumed
+
+Those physical timings would need extra sensing, for example:
+- encoder feedback
+- a logic analyser on output lines
+- an external high-speed camera
+- another motion sensor
+
+So in this project the latency numbers should be described as software or
+command latency unless external measurement hardware is added.
 
 ### Current runtime notes
 - live test freezes after `30` consecutive bad frames and recovers after `3` good frames
