@@ -421,9 +421,9 @@ Current full demo dance:
 - `HOME`
 
 Live-test controls:
-- `a`: arm guardian enforcement when current reading is safe
+- `a`: continue
 - `d`: disarm and return to setup mode
-- `r`: acknowledge a frozen state and let the guardian recover
+- `r`: continue
 - `q`: quit
 
 Full-demo controls:
@@ -432,14 +432,14 @@ Full-demo controls:
 - `q`: quit
 
 Physical button behavior:
-- in live mode, the button routes through the guardian/interlock acknowledgement path
-- in full demo, the same `ACK_REQUEST` acts as `continue`
+- in both live mode and full demo, the physical button acts as `continue`
 - before arm, `continue` means `arm/start`
 - after a freeze, `continue` means `acknowledge and resume`
 
 GPIO overrides:
 - `ARGUS_BUTTON_ACK_GPIO` defaults to `24`
-- `ARGUS_BUTTON_ARM_GPIO` and `ARGUS_BUTTON_DISARM_GPIO` are optional extras
+- `ARGUS_BUTTON_ARM_GPIO` and `ARGUS_BUTTON_DISARM_GPIO` remain optional, but
+  the default operator contract uses a single physical continue button
 - `ARGUS_BUTTON_ACTIVE_LOW` defaults to `1`
 - `ARGUS_BUTTON_DEBOUNCE_MS` defaults to `50`
 

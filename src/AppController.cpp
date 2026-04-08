@@ -1878,7 +1878,8 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         << cameraBackendPreferenceToString(options.backend_preference) << "\n"
         << "[LIVE_TEST] Auto operator ack: "
         << (options.auto_ack ? "ON" : "OFF") << "\n"
-        << "[LIVE_TEST] Controls: a=arm, d=disarm, r=ack, q=quit\n"
+        << "[LIVE_TEST] Physical button = continue (arm/start or resume)\n"
+        << "[LIVE_TEST] Controls: a=continue, d=disarm, r=continue, q=quit\n"
         << "[LIVE_TEST] Starting in DISARMED setup mode\n"
         << "[LIVE_TEST] Guardian thresholds: freeze after "
         << kLiveFreezeBadFrameThreshold
@@ -1957,9 +1958,8 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
     }
     std::cout << std::endl;
     if (!button_module.available()) {
-        std::cout << "[LIVE_TEST] Configure ARGUS_BUTTON_ARM_GPIO, "
-                     "ARGUS_BUTTON_DISARM_GPIO, and/or ARGUS_BUTTON_ACK_GPIO to "
-                     "enable physical operator buttons."
+        std::cout << "[LIVE_TEST] Configure ARGUS_BUTTON_ACK_GPIO to enable the "
+                     "physical continue button."
                   << std::endl;
     }
 
@@ -2038,16 +2038,20 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         return true;
     };
 
+    auto requestContinue = [&]() -> bool {
+        return guardian_armed ? requestAcknowledge() : requestArm();
+    };
+
     auto requestFromButton = [&](PhysicalButtonEvent event) -> bool {
         std::cout << "[BUTTON] " << PhysicalButtonModule::eventToString(event)
                   << std::endl;
         switch (event) {
             case PhysicalButtonEvent::ARM_REQUEST:
-                return requestArm();
-            case PhysicalButtonEvent::DISARM_REQUEST:
-                return requestDisarm();
             case PhysicalButtonEvent::ACK_REQUEST:
-                return requestAcknowledge();
+                return requestContinue();
+            case PhysicalButtonEvent::DISARM_REQUEST:
+                std::cout << "[LIVE_TEST] button ignored" << std::endl;
+                return true;
         }
         return true;
     };
@@ -2195,8 +2199,8 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
 
         cv::putText(display_frame,
                     std::string("CONTROL: ") +
-                        (guardian_armed ? "ARMED (d=disarm, r=ack)"
-                                        : "DISARMED (a=arm, r=ack)") +
+                        (guardian_armed ? "ARMED (d=disarm, a/r/button=continue)"
+                                        : "DISARMED (a/r/button=continue)") +
                         " | CAN_ARM: " + (frame_is_safe ? "YES" : "NO"),
                     cv::Point(16, 120),
                     cv::FONT_HERSHEY_SIMPLEX,
@@ -2251,13 +2255,13 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         }
 
         if (key == 'r' || key == 'R') {
-            if (!requestAcknowledge()) {
+            if (!requestContinue()) {
                 break;
             }
         }
 
         if (key == 'a' || key == 'A') {
-            if (!requestArm()) {
+            if (!requestContinue()) {
                 break;
             }
         }
