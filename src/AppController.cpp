@@ -74,6 +74,8 @@ constexpr int kDemoLowerStep = 45;
 constexpr int kDemoUpperStep = 45;
 constexpr int kDemoGripStep = 45;
 constexpr std::chrono::milliseconds kCaptureRetryBackoff{50};
+constexpr std::chrono::milliseconds kDemoSlewStepInterval{20};
+constexpr int kDemoSlewStepDegrees = 5;
 constexpr std::chrono::milliseconds kSurgeryRetractDwell{350};
 constexpr int kSurgeryForwardOffset = 22;
 constexpr int kSurgeryBackwardOffset = -22;
@@ -2314,6 +2316,8 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
     std::string current_pose_name = "HOME";
     std::size_t selected_routine_index = 0;
     std::size_t next_routine_step_index = 0;
+    SmokeJointOffsets current_pose_offsets = kSmokeHomePose;
+    bool current_pose_offsets_known = false;
     ControllerEventQueue control_events;
     CppTimerCallback live_step_timer;
     bool live_step_timer_started = false;
@@ -2326,14 +2330,70 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
 
     auto stagePose = [&](const DemoPoseStep& step) -> bool {
         bool clamped = false;
-        const MeArmJointTargets targets = makeDemoTargets(step.offsets, clamped);
-
-        if (!motion_controller_.setTargets(targets)) {
-            motion_faulted = true;
-            std::cerr << "[LIVE_TEST] failed to stage pose " << step.name << ": "
-                      << motion_controller_.lastErrorString() << std::endl;
-            return false;
+        const SmokeJointOffsets target_offsets =
+            clampDemoOffsets(step.offsets, clamped);
+        SmokeJointOffsets start_offsets = current_pose_offsets;
+        if (!current_pose_offsets_known) {
+            start_offsets = target_offsets;
         }
+
+        auto applyOffsets = [&](const SmokeJointOffsets& offsets,
+                                const char* context) -> bool {
+            bool target_clamped = false;
+            const MeArmJointTargets targets = makeDemoTargets(offsets, target_clamped);
+            if (!motion_controller_.setTargets(targets)) {
+                motion_faulted = true;
+                std::cerr << "[LIVE_TEST] failed to stage pose " << step.name
+                          << " (" << context << "): "
+                          << motion_controller_.lastErrorString() << std::endl;
+                return false;
+            }
+            return true;
+        };
+
+        auto stepTowards = [&](int current, int target) {
+            if (current < target) {
+                return std::min(current + kDemoSlewStepDegrees, target);
+            }
+            if (current > target) {
+                return std::max(current - kDemoSlewStepDegrees, target);
+            }
+            return current;
+        };
+
+        SmokeJointOffsets next_offsets = start_offsets;
+        bool moved = false;
+        while (next_offsets.base != target_offsets.base ||
+               next_offsets.lower != target_offsets.lower ||
+               next_offsets.upper != target_offsets.upper ||
+               next_offsets.grip != target_offsets.grip) {
+            moved = true;
+            next_offsets.base = stepTowards(next_offsets.base, target_offsets.base);
+            next_offsets.lower = stepTowards(next_offsets.lower, target_offsets.lower);
+            next_offsets.upper = stepTowards(next_offsets.upper, target_offsets.upper);
+            next_offsets.grip = stepTowards(next_offsets.grip, target_offsets.grip);
+
+            if (!applyOffsets(next_offsets, "slew")) {
+                return false;
+            }
+
+            std::string timer_error;
+            if (!waitForCppTimerDelay(kDemoSlewStepInterval, timer_error)) {
+                motion_faulted = true;
+                std::cerr << "[LIVE_TEST] pose slew timer failed: " << timer_error
+                          << std::endl;
+                return false;
+            }
+        }
+
+        if (!moved) {
+            if (!applyOffsets(target_offsets, "direct")) {
+                return false;
+            }
+        }
+
+        current_pose_offsets = target_offsets;
+        current_pose_offsets_known = true;
 
         current_pose_name = step.name;
         std::cout << "[LIVE_TEST] pose=" << step.name;
