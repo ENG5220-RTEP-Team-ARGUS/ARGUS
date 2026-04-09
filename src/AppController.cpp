@@ -9,23 +9,23 @@
 
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <cctype>
 #include <chrono>
 #include <csignal>
 #include <cmath>
 #include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <exception>
 #include <iomanip>
 #include <iostream>
 #include <fstream>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <thread>
 #include <vector>
 
 namespace {
@@ -186,6 +186,106 @@ struct RuntimeLatencyMetrics {
     std::optional<long long> freeze_cmd_ms;
     std::optional<long long> total_stop_ms;
     std::optional<long long> ack_to_resume_ms;
+};
+
+enum class ControllerEventKind {
+    ButtonInput,
+    DemoStepReady,
+    LiveStepReady,
+};
+
+enum class ControllerEventDisposition {
+    Consumed,
+    Deferred,
+    Abort,
+};
+
+struct ControllerEvent {
+    ControllerEventKind kind;
+    std::optional<PhysicalButtonEvent> button_event;
+};
+
+class ControllerEventQueue {
+public:
+    void pushButton(PhysicalButtonEvent button_event) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        queue_.push_back(
+            ControllerEvent{ControllerEventKind::ButtonInput, button_event});
+    }
+
+    void pushDemoStepReady() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (demo_step_pending_) {
+            return;
+        }
+        demo_step_pending_ = true;
+        queue_.push_back(ControllerEvent{ControllerEventKind::DemoStepReady,
+                                         std::nullopt});
+    }
+
+    void pushLiveStepReady() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (live_step_pending_) {
+            return;
+        }
+        live_step_pending_ = true;
+        queue_.push_back(ControllerEvent{ControllerEventKind::LiveStepReady,
+                                         std::nullopt});
+    }
+
+    template <typename Handler>
+    bool drain(Handler&& handler) {
+        std::deque<ControllerEvent> drained;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            drained.swap(queue_);
+            demo_step_pending_ = false;
+            live_step_pending_ = false;
+        }
+
+        std::vector<ControllerEvent> deferred;
+        deferred.reserve(drained.size());
+        for (const ControllerEvent& event : drained) {
+            const ControllerEventDisposition disposition = handler(event);
+            if (disposition == ControllerEventDisposition::Abort) {
+                return false;
+            }
+            if (disposition == ControllerEventDisposition::Deferred) {
+                deferred.push_back(event);
+            }
+        }
+
+        if (!deferred.empty()) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            for (const ControllerEvent& event : deferred) {
+                switch (event.kind) {
+                    case ControllerEventKind::ButtonInput:
+                        queue_.push_back(event);
+                        break;
+                    case ControllerEventKind::DemoStepReady:
+                        if (!demo_step_pending_) {
+                            demo_step_pending_ = true;
+                            queue_.push_back(event);
+                        }
+                        break;
+                    case ControllerEventKind::LiveStepReady:
+                        if (!live_step_pending_) {
+                            live_step_pending_ = true;
+                            queue_.push_back(event);
+                        }
+                        break;
+                }
+            }
+        }
+
+        return true;
+    }
+
+private:
+    std::mutex mutex_;
+    std::deque<ControllerEvent> queue_;
+    bool demo_step_pending_ = false;
+    bool live_step_pending_ = false;
 };
 
 long long elapsedMilliseconds(std::chrono::steady_clock::time_point from,
@@ -1385,7 +1485,12 @@ int AppController::runButtonTest() {
                       << PhysicalButtonModule::eventToString(event) << std::endl;
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        std::string timer_error;
+        if (!waitForCppTimerDelay(std::chrono::milliseconds(20), timer_error)) {
+            std::cerr << "[BUTTON_TEST] delay timer failed: " << timer_error
+                      << std::endl;
+            return 1;
+        }
     }
 }
 
@@ -1972,6 +2077,92 @@ int AppController::runMotionSmokeTest(const MotionSmokeTestOptions& options) {
     return 0;
 }
 
+int AppController::runCameraBackendCheck(const LiveTestOptions& options) {
+    constexpr int kValidationFrameTarget = 60;
+    constexpr int kMaxConsecutiveFailures = 10;
+
+    std::cout << "[CAMERA_CHECK] camera=" << options.camera_index
+              << " backend_request="
+              << cameraBackendPreferenceToString(options.backend_preference)
+              << " frames=" << kValidationFrameTarget << std::endl;
+
+    CameraCapture camera_capture(
+        CameraCapture::Options{options.camera_index, options.backend_preference});
+    std::cout << "[CAMERA_CHECK] backend_active="
+              << camera_capture.backendImplementation() << " ("
+              << camera_capture.backendName() << ")" << std::endl;
+
+    FrameEvent frame_event;
+    int frames_received = 0;
+    int frame_failures = 0;
+    int consecutive_failures = 0;
+    int frame_width = 0;
+    int frame_height = 0;
+    std::optional<std::chrono::steady_clock::time_point> first_capture_timestamp;
+    std::optional<std::chrono::steady_clock::time_point> last_capture_timestamp;
+
+    const auto validation_start = std::chrono::steady_clock::now();
+    while (frames_received < kValidationFrameTarget &&
+           consecutive_failures < kMaxConsecutiveFailures) {
+        if (!camera_capture.waitForNextFrame(frame_event)) {
+            ++frame_failures;
+            ++consecutive_failures;
+            std::cerr << "[CAMERA_CHECK] frame failure " << frame_failures
+                      << " (consecutive=" << consecutive_failures << ")"
+                      << std::endl;
+            continue;
+        }
+
+        ++frames_received;
+        consecutive_failures = 0;
+        frame_width = frameWidth(frame_event.image_data);
+        frame_height = frameHeight(frame_event.image_data);
+        if (!first_capture_timestamp.has_value()) {
+            first_capture_timestamp = frame_event.capture_timestamp;
+            std::cout << "[CAMERA_CHECK] first_frame_ms="
+                      << elapsedMilliseconds(validation_start,
+                                             *first_capture_timestamp)
+                      << " size=" << frame_width << "x" << frame_height
+                      << std::endl;
+        }
+        last_capture_timestamp = frame_event.capture_timestamp;
+    }
+
+    if (frames_received == 0) {
+        std::cerr << "[CAMERA_CHECK] no frames received" << std::endl;
+        return 1;
+    }
+
+    const long long sample_window_ms =
+        (first_capture_timestamp.has_value() && last_capture_timestamp.has_value())
+            ? elapsedMilliseconds(*first_capture_timestamp,
+                                  *last_capture_timestamp)
+            : 0;
+    const double approx_fps =
+        (frames_received > 1 && sample_window_ms > 0)
+            ? (1000.0 * static_cast<double>(frames_received - 1) /
+               static_cast<double>(sample_window_ms))
+            : 0.0;
+
+    std::ostringstream fps_stream;
+    fps_stream << std::fixed << std::setprecision(1) << approx_fps;
+
+    std::cout << "[CAMERA_CHECK] summary: frames=" << frames_received
+              << " failures=" << frame_failures
+              << " sample_window_ms=" << sample_window_ms
+              << " approx_fps=" << fps_stream.str()
+              << " backend=" << camera_capture.backendImplementation() << " ("
+              << camera_capture.backendName() << ")" << std::endl;
+
+    if (consecutive_failures >= kMaxConsecutiveFailures) {
+        std::cerr << "[CAMERA_CHECK] failed after repeated capture errors"
+                  << std::endl;
+        return 1;
+    }
+
+    return 0;
+}
+
 int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
     if (options.auto_ack) {
         std::cerr << "[DEMO] --auto-ack is not supported in full-demo mode."
@@ -2044,8 +2235,8 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
     bool home_pose_staged = false;
     std::string current_pose_name = "NONE";
     std::size_t next_step_index = 0;
+    ControllerEventQueue control_events;
     CppTimerCallback demo_step_timer;
-    std::atomic<bool> demo_step_due{false};
     bool demo_step_timer_started = false;
     RuntimeLatencyMetrics latency_metrics;
     std::optional<std::chrono::steady_clock::time_point>
@@ -2084,7 +2275,6 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
             demo_step_timer.stop();
             demo_step_timer_started = false;
         }
-        demo_step_due.store(false, std::memory_order_relaxed);
     };
 
     auto startDemoStepTimer = [&]() -> bool {
@@ -2092,9 +2282,8 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
             return true;
         }
 
-        demo_step_due.store(false, std::memory_order_relaxed);
         demo_step_timer.registerEventCallback(
-            [&]() { demo_step_due.store(true, std::memory_order_relaxed); });
+            [&]() { control_events.pushDemoStepReady(); });
 
         try {
             demo_step_timer.startms(static_cast<long>(kDemoStepDwell.count()), PERIODIC);
@@ -2288,22 +2477,28 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
         }
     };
 
-    auto maybeAdvanceDemoPose = [&]() -> bool {
-        if (!demo_armed || !motion_gate_open || waiting_for_ack) {
-            return true;
-        }
+    auto handleControlEvent =
+        [&](const ControllerEvent& event) -> ControllerEventDisposition {
+        switch (event.kind) {
+            case ControllerEventKind::ButtonInput:
+                return requestFromButton(*event.button_event)
+                           ? ControllerEventDisposition::Consumed
+                           : ControllerEventDisposition::Abort;
+            case ControllerEventKind::DemoStepReady:
+                if (!demo_armed || !motion_gate_open || waiting_for_ack) {
+                    return ControllerEventDisposition::Deferred;
+                }
 
-        if (!demo_step_due.exchange(false, std::memory_order_relaxed)) {
-            return true;
-        }
+                if (!stagePose(kDemoSequence[next_step_index])) {
+                    return ControllerEventDisposition::Abort;
+                }
 
-        const DemoPoseStep& step = kDemoSequence[next_step_index];
-        if (!stagePose(step)) {
-            return false;
+                next_step_index = (next_step_index + 1) % kDemoSequence.size();
+                return ControllerEventDisposition::Consumed;
+            case ControllerEventKind::LiveStepReady:
+                return ControllerEventDisposition::Consumed;
         }
-
-        next_step_index = (next_step_index + 1) % kDemoSequence.size();
-        return true;
+        return ControllerEventDisposition::Consumed;
     };
 
     cv::namedWindow(kDemoWindowName, cv::WINDOW_AUTOSIZE);
@@ -2389,17 +2584,10 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
 
         PhysicalButtonEvent button_event;
         while (button_module.poll(button_event)) {
-            if (!requestFromButton(button_event)) {
-                motion_faulted = true;
-                break;
-            }
+            control_events.pushButton(button_event);
         }
 
-        if (motion_faulted) {
-            break;
-        }
-
-        if (!maybeAdvanceDemoPose()) {
+        if (!control_events.drain(handleControlEvent)) {
             motion_faulted = true;
             break;
         }
@@ -2617,7 +2805,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
     std::string current_pose_name = "HOME";
     std::size_t selected_routine_index = 0;
     std::size_t next_routine_step_index = 0;
-    std::atomic<bool> live_step_due{false};
+    ControllerEventQueue control_events;
     CppTimerCallback live_step_timer;
     bool live_step_timer_started = false;
     RuntimeLatencyMetrics latency_metrics;
@@ -2652,7 +2840,6 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
             live_step_timer.stop();
             live_step_timer_started = false;
         }
-        live_step_due.store(false, std::memory_order_relaxed);
     };
 
     auto startLiveStepTimer = [&]() -> bool {
@@ -2660,9 +2847,8 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
             return true;
         }
 
-        live_step_due.store(false, std::memory_order_relaxed);
         live_step_timer.registerEventCallback(
-            [&]() { live_step_due.store(true, std::memory_order_relaxed); });
+            [&]() { control_events.pushLiveStepReady(); });
         try {
             live_step_timer.startms(static_cast<long>(kDemoStepDwell.count()), PERIODIC);
         } catch (const char* exception) {
@@ -2696,32 +2882,10 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         }
     };
 
-    auto maybeAdvanceRoutine = [&]() -> bool {
-        if (!guardian_armed || !motion_gate_open || waiting_for_ack) {
-            return true;
-        }
-
-        if (!live_step_due.exchange(false, std::memory_order_relaxed)) {
-            return true;
-        }
-
-        const LiveRoutineDefinition routine =
-            getLiveRoutineDefinition(selected_routine_index);
-        const DemoPoseStep& step = routine.steps[next_routine_step_index];
-        if (!stagePose(step)) {
-            return false;
-        }
-
-        next_routine_step_index =
-            (next_routine_step_index + 1) % routine.step_count;
-        return true;
-    };
-
     auto selectRoutine = [&](std::size_t routine_index) -> bool {
         const LiveRoutineDefinition routine = getLiveRoutineDefinition(routine_index);
         selected_routine_index = routine_index;
         next_routine_step_index = 0;
-        live_step_due.store(false, std::memory_order_relaxed);
         std::cout << "[LIVE_TEST] routine " << routine.number << " selected: "
                   << routine.name << std::endl;
 
@@ -2963,6 +3127,35 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         return true;
     };
 
+    auto handleControlEvent =
+        [&](const ControllerEvent& event) -> ControllerEventDisposition {
+        switch (event.kind) {
+            case ControllerEventKind::ButtonInput:
+                return requestFromButton(*event.button_event)
+                           ? ControllerEventDisposition::Consumed
+                           : ControllerEventDisposition::Abort;
+            case ControllerEventKind::LiveStepReady: {
+                if (!guardian_armed || !motion_gate_open || waiting_for_ack) {
+                    return ControllerEventDisposition::Deferred;
+                }
+
+                const LiveRoutineDefinition routine =
+                    getLiveRoutineDefinition(selected_routine_index);
+                const DemoPoseStep& step = routine.steps[next_routine_step_index];
+                if (!stagePose(step)) {
+                    return ControllerEventDisposition::Abort;
+                }
+
+                next_routine_step_index =
+                    (next_routine_step_index + 1) % routine.step_count;
+                return ControllerEventDisposition::Consumed;
+            }
+            case ControllerEventKind::DemoStepReady:
+                return ControllerEventDisposition::Consumed;
+        }
+        return ControllerEventDisposition::Consumed;
+    };
+
     cv::namedWindow(kLiveWindowName, cv::WINDOW_AUTOSIZE);
 
     struct LiveStatusSnapshot {
@@ -3090,12 +3283,11 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
 
         PhysicalButtonEvent button_event;
         while (button_module.poll(button_event)) {
-            if (!requestFromButton(button_event)) {
-                break;
-            }
+            control_events.pushButton(button_event);
         }
 
-        if (motion_faulted) {
+        if (!control_events.drain(handleControlEvent)) {
+            motion_faulted = true;
             break;
         }
 
@@ -3106,10 +3298,6 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
             interlock->operatorAcknowledge();
             std::cout << "[LIVE_TEST] Operator acknowledge sent automatically"
                       << std::endl;
-        }
-
-        if (!maybeAdvanceRoutine()) {
-            break;
         }
 
         if (guardian_armed) {

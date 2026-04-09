@@ -267,7 +267,25 @@ Runs built-in state-machine scenarios without live camera or hardware motion:
 ./build/ARGUS
 ```
 
-#### 2) Live marker test
+#### 2) Camera backend compliance check
+Runs a short capture validation pass and prints backend/frame summary stats:
+
+```bash
+./scripts/camera_backend_check.sh
+```
+
+or directly:
+
+```bash
+./build/ARGUS --camera-backend-check --camera-index 0 --camera-backend libcamera2opencv
+```
+
+Notes:
+- wrapper default: checks `libcamera2opencv` first, then validates the OpenCV fallback
+- use `--camera-backend <name>` to force a single backend
+- this mode is intended for repeatable Pi backend validation logs
+
+#### 3) Live marker test
 Recommended on Raspberry Pi:
 
 ```bash
@@ -288,7 +306,7 @@ Notes:
   older OpenCV/V4L2 path only if that run fails
 - if you want to force a backend explicitly, pass `--camera-backend`
 
-#### 3) Motion smoke test
+#### 4) Motion smoke test
 Runs a motion-only servo sweep through the existing `AppController -> MotionController` path:
 
 ```bash
@@ -310,7 +328,7 @@ Selected joint pattern:
 2. Move the selected joint `0 -> -90 -> +90 -> 0`
 3. Hold each step for about 3 seconds
 
-#### 4) Move all joints to home
+#### 5) Move all joints to home
 Moves all joints to logical `0` / home and exits:
 
 ```bash
@@ -323,7 +341,7 @@ or directly:
 ./build/ARGUS --motion-home
 ```
 
-#### 5) Interactive servo console
+#### 6) Interactive servo console
 Runs an interactive terminal console for direct joint positioning through the existing motion path:
 
 ```bash
@@ -349,7 +367,7 @@ Behavior:
 - logical range is clamped to `-90..+90`
 - use `Ctrl+C` or `exit` to quit
 
-#### 6) Servo calibration console
+#### 7) Servo calibration console
 Runs a raw-pulse calibration console for matching physical horn angle to PCA9685 pulse ticks:
 
 ```bash
@@ -380,7 +398,7 @@ Behavior:
 - `write` saves the current summary to `config/servo_calibration_latest.txt`
 - use `Ctrl+C` or `exit` to quit
 
-#### 7) Physical button test
+#### 8) Physical button test
 Runs the GPIO-backed physical button module by itself:
 
 ```bash
@@ -393,7 +411,7 @@ or directly:
 sudo -E ./build/ARGUS --button-test
 ```
 
-#### 8) Full pipeline hardware demo
+#### 9) Full pipeline hardware demo
 Runs camera + vision + guardian + interlock + motion through the normal safety path:
 
 ```bash

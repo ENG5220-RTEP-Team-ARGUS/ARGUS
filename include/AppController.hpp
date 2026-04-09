@@ -34,6 +34,7 @@ public:
     int runInteractiveServoConsole();
     int runMotionHomePose();
     int runMotionSmokeTest(const MotionSmokeTestOptions& options);
+    int runCameraBackendCheck(const LiveTestOptions& options);
     int runFullPipelineDemo(const LiveTestOptions& options);
     int runLiveMarkerTest(const LiveTestOptions& options);
 

@@ -16,6 +16,7 @@ void printUsage(const char* program_name) {
         << "  " << program_name << " --servo-console\n"
         << "  " << program_name << " --motion-home\n"
         << "  " << program_name << " --motion-smoke-test [options]\n"
+        << "  " << program_name << " --camera-backend-check [options]\n"
         << "  " << program_name << " --live-test [options]\n"
         << "\nOptions:\n"
         << "  --button-test             Run a GPIO button diagnostic loop\n"
@@ -24,6 +25,7 @@ void printUsage(const char* program_name) {
         << "  --servo-console           Run an interactive servo console (for example: 'base 90')\n"
         << "  --motion-home             Move all joints to logical 0 / home and exit\n"
         << "  --motion-smoke-test       Run the motion-only servo smoke test (all joints by default)\n"
+        << "  --camera-backend-check    Capture a short sample and report backend/frame stats\n"
         << "  --base                    Smoke-test only the base servo\n"
         << "  --lower                   Smoke-test only the lower servo\n"
         << "  --upper                   Smoke-test only the upper servo\n"
@@ -99,6 +101,7 @@ int main(int argc, char* argv[]) {
     bool run_servo_console = false;
     bool run_motion_home = false;
     bool run_motion_smoke_test = false;
+    bool run_camera_backend_check = false;
     AppController::LiveTestOptions options;
     AppController::MotionSmokeTestOptions smoke_options;
     bool smoke_joint_selected = false;
@@ -143,6 +146,11 @@ int main(int argc, char* argv[]) {
 
         if (arg == "--motion-smoke-test") {
             run_motion_smoke_test = true;
+            continue;
+        }
+
+        if (arg == "--camera-backend-check") {
+            run_camera_backend_check = true;
             continue;
         }
 
@@ -204,22 +212,29 @@ int main(int argc, char* argv[]) {
         (run_button_test && run_servo_console) ||
         (run_button_test && run_motion_home) ||
         (run_button_test && run_motion_smoke_test) ||
+        (run_button_test && run_camera_backend_check) ||
         (run_live_test && run_full_demo) ||
         (run_live_test && run_servo_calibrate) ||
         (run_live_test && run_servo_console) ||
         (run_live_test && run_motion_home) ||
         (run_live_test && run_motion_smoke_test) ||
+        (run_live_test && run_camera_backend_check) ||
         (run_full_demo && run_servo_calibrate) ||
         (run_full_demo && run_servo_console) ||
         (run_full_demo && run_motion_home) ||
         (run_full_demo && run_motion_smoke_test) ||
+        (run_full_demo && run_camera_backend_check) ||
         (run_servo_calibrate && run_servo_console) ||
         (run_servo_calibrate && run_motion_home) ||
         (run_servo_calibrate && run_motion_smoke_test) ||
+        (run_servo_calibrate && run_camera_backend_check) ||
         (run_servo_console && run_motion_home) ||
         (run_servo_console && run_motion_smoke_test) ||
-        (run_motion_home && run_motion_smoke_test)) {
-        std::cerr << "Choose exactly one mode: --button-test, --full-demo, --live-test, --servo-calibrate, --servo-console, --motion-home, or --motion-smoke-test."
+        (run_servo_console && run_camera_backend_check) ||
+        (run_motion_home && run_motion_smoke_test) ||
+        (run_motion_home && run_camera_backend_check) ||
+        (run_motion_smoke_test && run_camera_backend_check)) {
+        std::cerr << "Choose exactly one mode: --button-test, --full-demo, --live-test, --servo-calibrate, --servo-console, --motion-home, --motion-smoke-test, or --camera-backend-check."
                   << std::endl;
         printUsage(argv[0]);
         return 1;
@@ -251,6 +266,10 @@ int main(int argc, char* argv[]) {
 
     if (run_motion_smoke_test) {
         return app_controller.runMotionSmokeTest(smoke_options);
+    }
+
+    if (run_camera_backend_check) {
+        return app_controller.runCameraBackendCheck(options);
     }
 
     if (run_full_demo) {
