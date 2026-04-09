@@ -278,6 +278,16 @@ struct SupervisoryUiModel {
     bool show_focus = false;
     std::string focus_label;
     cv::Scalar focus_color;
+    double focus_fraction = 0.0;
+    std::string camera_hud_text;
+    cv::Scalar camera_hud_color;
+    std::string camera_bottom_left;
+    std::string camera_bottom_right;
+    bool show_frozen_overlay = false;
+    std::string frozen_overlay_title;
+    std::string frozen_overlay_subtitle;
+    bool show_waiting_overlay = false;
+    std::string waiting_overlay_text;
     bool emphasise_danger = false;
 };
 
@@ -319,23 +329,34 @@ void drawSupervisoryGui(cv::Mat& frame, const SupervisoryUiModel& model) {
 
     const int width = frameWidth(frame);
     const int height = frameHeight(frame);
-    const int header_height = std::max(36, height / 13);
+    const int header_height = std::max(34, height / 14);
+    const int state_bar_height = std::max(28, height / 16);
     const int left_width = std::max(160, width / 4);
     const int right_width = std::max(180, width / 4);
-    const int panel_top = header_height + 8;
+    const int panel_top = header_height + state_bar_height + 8;
     const int panel_bottom = height - 8;
     const int left_x2 = left_width;
     const int right_x1 = width - right_width;
+    const int camera_x1 = left_x2 + 8;
+    const int camera_x2 = right_x1 - 8;
+    const int camera_y1 = panel_top;
+    const int camera_y2 = panel_bottom;
 
     const cv::Scalar panel_fill(245, 245, 245);
     const cv::Scalar panel_border(220, 220, 220);
     const cv::Scalar primary_text(25, 25, 25);
     const cv::Scalar muted_text(120, 120, 120);
     const cv::Scalar info_color(170, 140, 60);
+    const cv::Scalar white(255, 255, 255);
 
     drawPanel(frame,
               cv::Point(0, 0),
               cv::Point(width - 1, header_height),
+              panel_fill,
+              panel_border);
+    drawPanel(frame,
+              cv::Point(0, header_height),
+              cv::Point(width - 1, header_height + state_bar_height),
               panel_fill,
               panel_border);
     drawPanel(frame,
@@ -348,120 +369,217 @@ void drawSupervisoryGui(cv::Mat& frame, const SupervisoryUiModel& model) {
               cv::Point(width - 1, panel_bottom),
               panel_fill,
               panel_border);
+    drawRectangle(frame,
+                  cv::Point(camera_x1, camera_y1),
+                  cv::Point(camera_x2, camera_y2),
+                  panel_border,
+                  1);
+
+    drawPanel(frame,
+              cv::Point(12, 6),
+              cv::Point(40, 32),
+              panel_fill,
+              model.state_color);
+    cv::putText(frame,
+                "A",
+                cv::Point(22, 25),
+                cv::FONT_HERSHEY_SIMPLEX,
+                0.6,
+                primary_text,
+                2);
 
     cv::putText(frame,
-                "ARGUS | " + model.mode_title,
-                cv::Point(16, 26),
+                "ARGUS",
+                cv::Point(52, 21),
                 cv::FONT_HERSHEY_SIMPLEX,
-                0.65,
+                0.55,
                 primary_text,
                 2);
     cv::putText(frame,
-                "Operator -> " + model.operator_prompt,
-                cv::Point(right_x1 + 12, 26),
+                "Safety Supervisor",
+                cv::Point(52, 34),
                 cv::FONT_HERSHEY_SIMPLEX,
-                0.48,
+                0.35,
+                muted_text,
+                1);
+    cv::putText(frame,
+                "ONLINE",
+                cv::Point(width - 135, 20),
+                uiPlainFontFace(),
+                0.9,
+                cv::Scalar(60, 170, 80),
+                1);
+    cv::putText(frame,
+                model.mode_title,
+                cv::Point(width - 135, 34),
+                uiPlainFontFace(),
+                0.9,
                 primary_text,
                 1);
 
-    int y = panel_top + 24;
-    cv::putText(frame,
-                "SAFETY STATE",
-                cv::Point(16, y),
-                cv::FONT_HERSHEY_SIMPLEX,
-                0.45,
-                muted_text,
-                1);
-    y += 32;
     cv::putText(frame,
                 model.state_label,
-                cv::Point(16, y),
-                cv::FONT_HERSHEY_SIMPLEX,
+                cv::Point(16, header_height + 20),
+                uiPlainFontFace(),
                 1.0,
                 model.state_color,
-                3);
-    y += 24;
+                1);
     cv::putText(frame,
                 model.state_description,
-                cv::Point(16, y),
-                uiPlainFontFace(),
-                1.0,
-                primary_text,
-                1);
-
-    y += 26;
-    drawLine(frame, cv::Point(12, y), cv::Point(left_x2 - 12, y), panel_border, 1);
-    y += 20;
-    cv::putText(frame,
-                "MOTION GATE",
-                cv::Point(16, y),
+                cv::Point(84, header_height + 20),
                 cv::FONT_HERSHEY_SIMPLEX,
-                0.45,
+                0.38,
                 muted_text,
                 1);
-    y += 28;
     cv::putText(frame,
-                model.motion_label,
-                cv::Point(16, y),
+                "Operator -> " + model.operator_prompt,
+                cv::Point(width - 240, header_height + 20),
                 cv::FONT_HERSHEY_SIMPLEX,
+                0.38,
+                model.state_color,
+                1);
+
+    const int card_margin = 12;
+    const int card_width = left_x2 - (2 * card_margin);
+    int card_y = panel_top + 10;
+    auto drawLeftCard = [&](int height_px,
+                            const cv::Scalar& border_color,
+                            const auto& painter) {
+        drawPanel(frame,
+                  cv::Point(card_margin, card_y),
+                  cv::Point(card_margin + card_width, card_y + height_px),
+                  white,
+                  border_color);
+        painter(card_margin, card_y);
+        card_y += height_px + 10;
+    };
+
+    drawLeftCard(82, model.state_color, [&](int x, int y0) {
+        cv::putText(frame,
+                    "SAFETY STATE",
+                    cv::Point(x + 12, y0 + 16),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.35,
+                    muted_text,
+                    1);
+        cv::putText(frame,
+                    model.state_label,
+                    cv::Point(x + 12, y0 + 48),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.85,
+                    model.state_color,
+                    2);
+        cv::putText(frame,
+                    model.state_description,
+                    cv::Point(x + 12, y0 + 66),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.34,
+                    primary_text,
+                    1);
+    });
+
+    drawLeftCard(62, model.motion_color, [&](int x, int y0) {
+        cv::putText(frame,
+                    "MOTION GATE",
+                    cv::Point(x + 12, y0 + 16),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.35,
+                    muted_text,
+                    1);
+        cv::putText(frame,
+                    std::string("MOTION ") + model.motion_label,
+                    cv::Point(x + 12, y0 + 44),
+                    uiPlainFontFace(),
+                    1.0,
+                    model.motion_color,
+                    1);
+    });
+
+    drawLeftCard(62, panel_border, [&](int x, int y0) {
+        cv::putText(frame,
+                    "NEXT ACTION",
+                    cv::Point(x + 12, y0 + 16),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.35,
+                    muted_text,
+                    1);
+        cv::putText(frame,
+                    model.next_action,
+                    cv::Point(x + 12, y0 + 44),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.42,
+                    primary_text,
+                    1);
+    });
+
+    if (model.freeze_reason != "NONE" && model.freeze_reason != "N/A") {
+        drawLeftCard(62, cv::Scalar(60, 60, 200), [&](int x, int y0) {
+            cv::putText(frame,
+                        "FREEZE REASON",
+                        cv::Point(x + 12, y0 + 16),
+                        cv::FONT_HERSHEY_SIMPLEX,
+                        0.35,
+                        cv::Scalar(60, 60, 200),
+                        1);
+            cv::putText(frame,
+                        model.freeze_reason,
+                        cv::Point(x + 12, y0 + 44),
+                        uiPlainFontFace(),
+                        1.0,
+                        severityColor(model.freeze_reason),
+                        1);
+        });
+    }
+
+    cv::putText(frame,
+                model.camera_hud_text,
+                cv::Point(camera_x1 + 12, camera_y1 + 20),
+                uiPlainFontFace(),
+                0.95,
+                model.camera_hud_color,
+                1);
+    cv::putText(frame,
+                "FOCUS " + model.focus_label,
+                cv::Point(camera_x2 - 145, camera_y1 + 20),
+                uiPlainFontFace(),
                 0.9,
-                model.motion_color,
-                2);
-
-    y += 24;
-    drawLine(frame, cv::Point(12, y), cv::Point(left_x2 - 12, y), panel_border, 1);
-    y += 20;
+                model.focus_color,
+                1);
     cv::putText(frame,
-                "NEXT ACTION",
-                cv::Point(16, y),
-                cv::FONT_HERSHEY_SIMPLEX,
-                0.45,
+                model.camera_bottom_left,
+                cv::Point(camera_x1 + 12, camera_y2 - 10),
+                uiPlainFontFace(),
+                0.8,
                 muted_text,
                 1);
-    y += 24;
     cv::putText(frame,
-                model.next_action,
-                cv::Point(16, y),
+                model.camera_bottom_right,
+                cv::Point(camera_x2 - 90, camera_y2 - 10),
                 uiPlainFontFace(),
-                1.2,
-                primary_text,
-                1);
-
-    y += 22;
-    drawLine(frame, cv::Point(12, y), cv::Point(left_x2 - 12, y), panel_border, 1);
-    y += 20;
-    cv::putText(frame,
-                "FREEZE REASON",
-                cv::Point(16, y),
-                cv::FONT_HERSHEY_SIMPLEX,
-                0.45,
+                0.8,
                 muted_text,
-                1);
-    y += 24;
-    cv::putText(frame,
-                model.freeze_reason,
-                cv::Point(16, y),
-                uiPlainFontFace(),
-                1.1,
-                severityColor(model.freeze_reason),
                 1);
 
     int rx = right_x1 + 12;
-    int ry = panel_top + 24;
-    cv::putText(frame,
-                "SUBSYSTEMS",
-                cv::Point(rx, ry),
-                cv::FONT_HERSHEY_SIMPLEX,
-                0.45,
-                muted_text,
-                1);
-    ry += 18;
-    drawLine(frame,
-             cv::Point(right_x1 + 10, ry),
-             cv::Point(width - 12, ry),
-             panel_border,
-             1);
-    ry += 18;
+    int ry = panel_top + 18;
+    auto drawRightSectionTitle = [&](const std::string& title) {
+        cv::putText(frame,
+                    title,
+                    cv::Point(rx, ry),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.35,
+                    muted_text,
+                    1);
+        ry += 12;
+        drawLine(frame,
+                 cv::Point(right_x1 + 10, ry),
+                 cv::Point(width - 12, ry),
+                 panel_border,
+                 1);
+        ry += 16;
+    };
+
+    drawRightSectionTitle("SUBSYSTEMS");
 
     for (const auto& row : model.status_rows) {
         cv::putText(frame,
@@ -479,24 +597,29 @@ void drawSupervisoryGui(cv::Mat& frame, const SupervisoryUiModel& model) {
                     1.0,
                     row.value_color,
                     1);
-        ry += 16;
+        ry += 14;
     }
 
     if (model.show_focus) {
-        drawLine(frame,
-                 cv::Point(right_x1 + 10, ry),
-                 cv::Point(width - 12, ry),
-                 panel_border,
-                 1);
-        ry += 20;
-        cv::putText(frame,
-                    "FOCUS",
-                    cv::Point(rx, ry),
-                    cv::FONT_HERSHEY_SIMPLEX,
-                    0.45,
-                    muted_text,
-                    1);
-        ry += 18;
+        ry += 6;
+        drawRightSectionTitle("FOCUS");
+        drawPanel(frame,
+                  cv::Point(rx, ry),
+                  cv::Point(width - 24, ry + 16),
+                  cv::Scalar(235, 235, 235),
+                  panel_border);
+        const int bar_width = std::max(
+            0,
+            static_cast<int>((width - right_x1 - 36) *
+                             std::clamp(model.focus_fraction, 0.0, 1.0)));
+        if (bar_width > 0) {
+            drawRectangle(frame,
+                          cv::Point(rx + 1, ry + 1),
+                          cv::Point(rx + bar_width, ry + 15),
+                          model.focus_color,
+                          -1);
+        }
+        ry += 32;
         cv::putText(frame,
                     model.focus_label,
                     cv::Point(rx, ry),
@@ -507,20 +630,8 @@ void drawSupervisoryGui(cv::Mat& frame, const SupervisoryUiModel& model) {
         ry += 18;
     }
 
-    drawLine(frame,
-             cv::Point(right_x1 + 10, ry),
-             cv::Point(width - 12, ry),
-             panel_border,
-             1);
-    ry += 20;
-    cv::putText(frame,
-                "LATENCY",
-                cv::Point(rx, ry),
-                cv::FONT_HERSHEY_SIMPLEX,
-                0.45,
-                muted_text,
-                1);
-    ry += 18;
+    ry += 6;
+    drawRightSectionTitle("LATENCY");
     cv::putText(frame,
                 "vision_us " + std::to_string(model.latency.vision_us),
                 cv::Point(rx, ry),
@@ -564,6 +675,41 @@ void drawSupervisoryGui(cv::Mat& frame, const SupervisoryUiModel& model) {
                 1.0,
                 primary_text,
                 1);
+
+    if (model.show_frozen_overlay) {
+        drawRectangle(frame,
+                      cv::Point(camera_x1 + 2, camera_y1 + 2),
+                      cv::Point(camera_x2 - 2, camera_y2 - 2),
+                      cv::Scalar(60, 60, 200),
+                      3);
+        cv::putText(frame,
+                    model.frozen_overlay_title,
+                    cv::Point(camera_x1 + 80, camera_y1 + 110),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    1.1,
+                    cv::Scalar(60, 60, 200),
+                    3);
+        cv::putText(frame,
+                    model.frozen_overlay_subtitle,
+                    cv::Point(camera_x1 + 70, camera_y1 + 140),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.45,
+                    cv::Scalar(60, 60, 200),
+                    1);
+    } else if (model.show_waiting_overlay) {
+        drawPanel(frame,
+                  cv::Point(camera_x1 + 80, camera_y2 - 60),
+                  cv::Point(camera_x2 - 80, camera_y2 - 28),
+                  white,
+                  cv::Scalar(50, 180, 230));
+        cv::putText(frame,
+                    model.waiting_overlay_text,
+                    cv::Point(camera_x1 + 92, camera_y2 - 38),
+                    uiPlainFontFace(),
+                    0.95,
+                    cv::Scalar(50, 180, 230),
+                    1);
+    }
 
     cv::putText(frame,
                 model.footer_info,
@@ -2327,36 +2473,45 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
             std::to_string(options.expected_marker_id) + " | " +
             camera_capture.backendName();
 
-        drawSupervisoryGui(
-            display_frame,
-            SupervisoryUiModel{
-                "FULL DEMO",
-                state_label,
-                state_description,
-                state_color,
-                motion_label,
-                motion_color,
-                "space/button = control",
-                next_action,
-                freeze_reason_text,
-                footer_info,
-                latency_metrics,
-                {
-                    {"Vision", safetyStateToString(current_vision_state),
-                     severityColor(safetyStateToString(current_vision_state))},
-                    {"Guardian", guardian_state_text,
-                     severityColor(guardian_state_text)},
-                    {"Interlock", interlock_state_text,
-                     severityColor(interlock_state_text)},
-                    {"Pose", current_pose_name, cv::Scalar(25, 25, 25)},
-                    {"Ready", scene_is_safe ? "YES" : "NO",
-                     scene_is_safe ? cv::Scalar(60, 170, 80)
-                                   : cv::Scalar(60, 60, 200)},
-                },
-                false,
-                "",
-                cv::Scalar(25, 25, 25),
-                demo_state_text == "FROZEN"});
+        SupervisoryUiModel demo_ui{};
+        demo_ui.mode_title = "FULL DEMO";
+        demo_ui.state_label = state_label;
+        demo_ui.state_description = state_description;
+        demo_ui.state_color = state_color;
+        demo_ui.motion_label = motion_label;
+        demo_ui.motion_color = motion_color;
+        demo_ui.operator_prompt = "space/button = control";
+        demo_ui.next_action = next_action;
+        demo_ui.freeze_reason = freeze_reason_text;
+        demo_ui.footer_info = footer_info;
+        demo_ui.latency = latency_metrics;
+        demo_ui.status_rows = {
+            {"Vision", safetyStateToString(current_vision_state),
+             severityColor(safetyStateToString(current_vision_state))},
+            {"Guardian", guardian_state_text, severityColor(guardian_state_text)},
+            {"Interlock", interlock_state_text, severityColor(interlock_state_text)},
+            {"Pose", current_pose_name, cv::Scalar(25, 25, 25)},
+            {"Ready", scene_is_safe ? "YES" : "NO",
+             scene_is_safe ? cv::Scalar(60, 170, 80) : cv::Scalar(60, 60, 200)},
+        };
+        demo_ui.camera_hud_text =
+            demo_state_text == "FROZEN" ? "UNSAFE - MOTION HALTED"
+            : demo_state_text == "WAIT_ACK" ? "SAFE - PRESS TO RESUME"
+            : demo_state_text == "RUNNING"  ? "LIVE - SUPERVISING"
+                                            : "ARMED - AWAITING START";
+        demo_ui.camera_hud_color =
+            demo_state_text == "FROZEN" ? cv::Scalar(60, 60, 200)
+                                        : state_color;
+        demo_ui.camera_bottom_left = "CAM:0 · 640x480";
+        demo_ui.camera_bottom_right = "30fps";
+        demo_ui.show_frozen_overlay = (demo_state_text == "FROZEN");
+        demo_ui.frozen_overlay_title = "UNSAFE";
+        demo_ui.frozen_overlay_subtitle = "MOTION FROZEN - CLEAR WORKSPACE";
+        demo_ui.show_waiting_overlay = (demo_state_text == "WAIT_ACK");
+        demo_ui.waiting_overlay_text = "WORKSPACE SAFE - PRESS BUTTON TO RESUME";
+        demo_ui.emphasise_danger = (demo_state_text == "FROZEN");
+
+        drawSupervisoryGui(display_frame, demo_ui);
 
         cv::imshow(kDemoWindowName, display_frame);
         const int key = cv::waitKey(1);
@@ -3031,42 +3186,65 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
             std::to_string(options.expected_marker_id) + " | " +
             camera_capture.backendName();
 
-        drawSupervisoryGui(
-            display_frame,
-            SupervisoryUiModel{
-                "LIVE TEST",
-                ui_state_label,
-                ui_state_description,
-                guardian_armed && guardian->getState() == GuardianState::FROZEN_UNSAFE
-                    ? cv::Scalar(60, 60, 200)
-                    : (frame_is_safe ? cv::Scalar(60, 170, 80)
-                                     : cv::Scalar(170, 140, 60)),
-                motion_gate_open ? "ALLOWED" : "BLOCKED",
-                motion_gate_open ? cv::Scalar(60, 170, 80)
-                                 : (frame_is_safe ? cv::Scalar(50, 180, 230)
-                                                  : cv::Scalar(60, 60, 200)),
-                "space/button = control",
-                next_action,
-                freeze_reason_text,
-                footer_info,
-                latency_metrics,
-                {
-                    {"Vision", safetyStateToString(current_vision_state),
-                     severityColor(safetyStateToString(current_vision_state))},
-                    {"Guardian", guardian_state_text,
-                     severityColor(guardian_state_text)},
-                    {"Interlock", interlock_state_text,
-                     severityColor(interlock_state_text)},
-                    {"Routine", routine_label, cv::Scalar(25, 25, 25)},
-                    {"Pose", current_pose_name, cv::Scalar(25, 25, 25)},
-                    {"Can arm", frame_is_safe ? "YES" : "NO",
-                     frame_is_safe ? cv::Scalar(60, 170, 80)
-                                   : cv::Scalar(60, 60, 200)},
-                },
-                true,
-                formatFocusScore(focus_score) + " (" + std::string(focus_quality) + ")",
-                focus_color,
-                guardian_armed && guardian->getState() == GuardianState::FROZEN_UNSAFE});
+        SupervisoryUiModel live_ui{};
+        live_ui.mode_title = "LIVE TEST";
+        live_ui.state_label = ui_state_label;
+        live_ui.state_description = ui_state_description;
+        live_ui.state_color =
+            guardian_armed && guardian->getState() == GuardianState::FROZEN_UNSAFE
+                ? cv::Scalar(60, 60, 200)
+                : (frame_is_safe ? cv::Scalar(60, 170, 80)
+                                 : cv::Scalar(170, 140, 60));
+        live_ui.motion_label = motion_gate_open ? "ALLOWED" : "BLOCKED";
+        live_ui.motion_color =
+            motion_gate_open ? cv::Scalar(60, 170, 80)
+                             : (frame_is_safe ? cv::Scalar(50, 180, 230)
+                                              : cv::Scalar(60, 60, 200));
+        live_ui.operator_prompt = "space/button = control";
+        live_ui.next_action = next_action;
+        live_ui.freeze_reason = freeze_reason_text;
+        live_ui.footer_info = footer_info;
+        live_ui.latency = latency_metrics;
+        live_ui.status_rows = {
+            {"Vision", safetyStateToString(current_vision_state),
+             severityColor(safetyStateToString(current_vision_state))},
+            {"Guardian", guardian_state_text, severityColor(guardian_state_text)},
+            {"Interlock", interlock_state_text, severityColor(interlock_state_text)},
+            {"Routine", routine_label, cv::Scalar(25, 25, 25)},
+            {"Pose", current_pose_name, cv::Scalar(25, 25, 25)},
+            {"Can arm", frame_is_safe ? "YES" : "NO",
+             frame_is_safe ? cv::Scalar(60, 170, 80) : cv::Scalar(60, 60, 200)},
+        };
+        live_ui.show_focus = true;
+        live_ui.focus_label =
+            formatFocusScore(focus_score) + " (" + std::string(focus_quality) + ")";
+        live_ui.focus_color = focus_color;
+        live_ui.focus_fraction = std::clamp(focus_score / 240.0, 0.0, 1.0);
+        live_ui.camera_hud_text =
+            guardian_armed && guardian->getState() == GuardianState::FROZEN_UNSAFE
+                ? "UNSAFE - MOTION HALTED"
+                : (guardian_armed && motion_gate_open && decision_is_safe)
+                      ? "LIVE - SUPERVISING"
+                : (!guardian_armed && frame_is_safe) ? "ARMED - AWAITING START"
+                                                     : "INITIALIZING";
+        live_ui.camera_hud_color =
+            guardian_armed && guardian->getState() == GuardianState::FROZEN_UNSAFE
+                ? cv::Scalar(60, 60, 200)
+                : (guardian_armed && motion_gate_open ? cv::Scalar(60, 170, 80)
+                                                      : cv::Scalar(170, 140, 60));
+        live_ui.camera_bottom_left = "CAM:0 · 640x480";
+        live_ui.camera_bottom_right = "30fps";
+        live_ui.show_frozen_overlay =
+            guardian_armed && guardian->getState() == GuardianState::FROZEN_UNSAFE;
+        live_ui.frozen_overlay_title = "UNSAFE";
+        live_ui.frozen_overlay_subtitle = "MOTION FROZEN - CLEAR WORKSPACE";
+        live_ui.show_waiting_overlay =
+            guardian_armed && guardian->getState() == GuardianState::RESET_PENDING;
+        live_ui.waiting_overlay_text = "WORKSPACE SAFE - PRESS BUTTON TO RESUME";
+        live_ui.emphasise_danger =
+            guardian_armed && guardian->getState() == GuardianState::FROZEN_UNSAFE;
+
+        drawSupervisoryGui(display_frame, live_ui);
 
         cv::imshow(kLiveWindowName, display_frame);
         const int key = cv::waitKey(1);
