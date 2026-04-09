@@ -375,8 +375,8 @@ Runs a key-driven teleop wrapper on top of `--servo-console` so you can nudge jo
 ```
 
 Default keymap presets:
-- `azerty`: `d` / `q` base left/right, `z` / `s` upper forward/backward, `a` / `e` lower up/down, `u` / `o` grip open/close
-- `qwerty`: `d` / `a` base left/right, `w` / `s` upper forward/backward, `q` / `e` lower up/down, `u` / `o` grip open/close
+- `azerty`: `d` / `q` base left/right, `z` / `s` upper forward/backward, `i` / `k` lower up/down, `j` / `l` grip open/close
+- `qwerty`: `d` / `a` base left/right, `w` / `s` upper forward/backward, `i` / `k` lower up/down, `j` / `l` grip open/close
 - `h`: home (all joints to 0)
 - `r`: status
 - `+` / `-`: increase / decrease step size
