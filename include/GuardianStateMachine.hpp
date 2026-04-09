@@ -25,6 +25,7 @@
 #include <string>
 #include <functional>
 #include <atomic>
+#include "MetricsLogger.hpp"
 
 /**
  * @enum GuardianState
@@ -172,6 +173,7 @@ private:
      *          Must be non-blocking and thread-safe.
      */
     std::function<void(GuardianState, GuardianState)> onStateChangeCallback;
+
 
     // ==================== Private Member Functions ====================
 
@@ -324,8 +326,7 @@ public:
      * @details Called synchronously after state update but before action execution.
      *          Useful for logging, monitoring, or UI updates.
      */
-    void setOnStateChangeCallback(
-        std::function<void(GuardianState, GuardianState)> callback);
+    void setOnStateChangeCallback(std::function<void(GuardianState, GuardianState)> callback);
     
     /**
      * @brief Gets the current state

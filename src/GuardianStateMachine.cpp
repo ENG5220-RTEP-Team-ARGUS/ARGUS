@@ -16,6 +16,7 @@
  */
 
 #include "GuardianStateMachine.hpp"
+#include "MetricsLogger.hpp" 
 #include <iostream>
 
 
@@ -343,8 +344,6 @@ void GuardianStateMachine::processEvent(GuardianEvent event) {
  * | FRAME_GOOD       | FRAME_GOOD       |
  * | FRAME_BAD        | FRAME_BAD        |
  *
- *
- * @note Non-blocking - 0(1) execution time
  * @note Thread-safe - can be called from camera/sensor callback threads
  *
  * @see processEvent() for detailed state machine logic
@@ -398,7 +397,6 @@ void GuardianStateMachine::operatorAcknowledge() {
  * without depending on specific hardware implementations. The state machine
  * depends on the abstract callback interface, not concrete robot classes.
  *
- * @note Callback is stored by copy - ensure captured references remain valid
  * @warning Callback must not block or system becomes unresponsive
  *
  * @see executeAction() where callback is invoked
@@ -416,7 +414,6 @@ void GuardianStateMachine::setOnFreezeCallback(std::function<void()> callback) {
  * Called synchronously during state transition from RESET_PENDING to
  * SAFE_MONITORING.
  *
- * @note Callback is stored by copy - ensure captured references remain valid
  * @warning Callback must not block or system becomes unresponsive
  *
  * @see executeAction() where callback is invoked
