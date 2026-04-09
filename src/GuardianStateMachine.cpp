@@ -54,8 +54,8 @@ GuardianStateMachine::GuardianStateMachine(int fc, int rc)
       onClearFreezeCallback(nullptr), 
       onStateChangeCallback(nullptr) { 
 
-    std::cout << "[INIT] Guardian State Machine initialized with freezeCount="
-              << freezeCount << ", recoverCount=" << recoverCount << std::endl;
+    std::string msg = "Guardian State Machine initialized with freezeCount=" + std::to_string(fc) + ", recoverCount=" + std::to_string(rc);
+    MetricsLogger::getInstance().logEvent("[INIT]", msg);
 }
 
 
@@ -97,8 +97,7 @@ void GuardianStateMachine::executeAction(GuardianAction action) {
             if (onFreezeCallback) {
                 onFreezeCallback();
             }
-
-            logAction("FREEZE_NOW - Motion blocked");
+            MetricsLogger::getInstance().logEvent("FREEZE_NOW", "Motion blocked");
             break;
 
         case GuardianAction::CLEAR_FREEZE:
@@ -109,8 +108,7 @@ void GuardianStateMachine::executeAction(GuardianAction action) {
             if (onClearFreezeCallback) {
                 onClearFreezeCallback();
             }
-
-            logAction("CLEAR_FREEZE - Motion allowed");
+            MetricsLogger::getInstance().logEvent("CLEAR_FREEZE", "Motion allowed");
             break;
 
         case GuardianAction::NONE:
@@ -181,15 +179,14 @@ void GuardianStateMachine::transitionTo(GuardianState newState, GuardianAction a
  * @endcode
  *
  * @note Thread-safe due to atomic counter reads
- * @todo Replace std::cout with configurable logging system (such as spdlog)
  */
 void GuardianStateMachine::logTransition(GuardianState from, GuardianState to) {
     // Only print if transition happened
     if (from != to) {
-        std::cout << "[TRANSITION] " << stateToString(from)
-                  << " -> " << stateToString(to)
-                  << " | bad_count=" << badCount
-                  << " good_count=" << goodCount << std::endl;
+        std::string message = stateToString(from) + " -> " + stateToString(to) + 
+                             " | bad_count=" + std::to_string(badCount.load()) + 
+                             " good_count=" + std::to_string(goodCount.load());
+        MetricsLogger::getInstance().logEvent("[TRANSITION]", message);
     }
 }
 
@@ -209,11 +206,9 @@ void GuardianStateMachine::logTransition(GuardianState from, GuardianState to) {
  * [ACTION] FREEZE_NOW - Motion blocked
  * [ACTION] CLEAR_FREEZE - Motion allowed
  * @endcode
- * 
- * @todo Replace std::cout with configurable logging system
  */
 void GuardianStateMachine::logAction(const std::string& action) {
-    std::cout << "[ACTION] " << action << std::endl;
+    MetricsLogger::getInstance().logEvent("[ACTION]", action);
 }
 
 
@@ -273,12 +268,13 @@ void GuardianStateMachine::processEvent(GuardianEvent event) {
                     transitionTo(GuardianState::FROZEN_UNSAFE, GuardianAction::FREEZE_NOW);
                 } else {
                     // Otherwise, log how close we are to freezing
-                    std::cout << "[SAFE_MONITORING] Frame Failed, bad_count=" << badCount << "/" << freezeCount << std::endl;
+                    std::string msg = "Frame Failed, bad_count=" + std::to_string(badCount.load()) + "/" + std::to_string(freezeCount.load());
+                    MetricsLogger::getInstance().logEvent("[SAFE_MONITORING]", msg);
                 }
             } else if (event == GuardianEvent::FRAME_GOOD) {
                 // Reset badCount - require consecutive bad frames
                 badCount = 0;
-                std::cout << "[SAFE_MONITORING] Frame Passed, bad_count reset" << std::endl;
+                MetricsLogger::getInstance().logEvent("[SAFE_MONITORING]", "Frame Passed, bad_count reset");
             }
             // OPERATOR_ACK ignored in this state
             break;
@@ -296,7 +292,7 @@ void GuardianStateMachine::processEvent(GuardianEvent event) {
             } else if (event == GuardianEvent::FRAME_BAD || event == GuardianEvent::FRAME_GOOD) {
                 // SAFETY: Ignore all frames - prevent automatic recovery
                 // Human must verify situation before system can recover
-                std::cout << "[FROZEN_UNSAFE] Remaining frozen, awaiting operator acknowledgment" << std::endl;
+                MetricsLogger::getInstance().logEvent("[FROZEN_UNSAFE]", "Remaining frozen, awaiting operator acknowledgment");
             }
             break;
 
@@ -317,13 +313,14 @@ void GuardianStateMachine::processEvent(GuardianEvent event) {
                     transitionTo(GuardianState::SAFE_MONITORING, GuardianAction::CLEAR_FREEZE);
                 } else {
                     // Log recovery progress
-                    std::cout << "[RESET_PENDING] good_count=" << goodCount << "/" << recoverCount << std::endl;
+                    std::string msg = "good_count=" + std::to_string(goodCount.load()) + "/" + std::to_string(recoverCount.load());
+                    MetricsLogger::getInstance().logEvent("[RESET_PENDING]", msg);
                 }
 
             } else if (event == GuardianEvent::FRAME_BAD) {
                 // Bad frame during recovery breaks confidence so reset goodCount and keep waiting
                 goodCount = 0;
-                std::cout << "[RESET_PENDING] Bad frame detected, good_count reset" << std::endl;
+                MetricsLogger::getInstance().logEvent("[RESET_PENDING]",  "Bad frame detected, good_count reset");
             }
             // OPERATOR_ACK ignored - already acknowledged
             break;
@@ -382,7 +379,7 @@ void GuardianStateMachine::processFrame(FrameStatus status) {
  * @see processEvent() for state transition logic
  */
 void GuardianStateMachine::operatorAcknowledge() {
-    std::cout << "[OPERATOR] Acknowledgment received" << std::endl;
+    MetricsLogger::getInstance().logEvent("[OPERATOR]", "Acknowledgment received");
     processEvent(GuardianEvent::OPERATOR_ACK);
 }
 
@@ -587,10 +584,11 @@ std::string GuardianStateMachine::getCurrentStateString() const {
  * @see getGoodCount() for good frame counter
  */
 void GuardianStateMachine::printStatus() const {
-    std::cout << "\n=== GUARDIAN STATUS ===" << std::endl;
-    std::cout << "State: " << getCurrentStateString() << std::endl;
-    std::cout << "Motion: " << (motionBlocked ? "BLOCKED" : "ALLOWED") << std::endl;
-    std::cout << "Bad Count: " << badCount << "/" << freezeCount << std::endl;
-    std::cout << "Good Count: " << goodCount << "/" << recoverCount << std::endl;
-    std::cout << "=======================\n" << std::endl;
+    std::string statusMsg = "\n=== GUARDIAN STATUS ===\n";
+    statusMsg += "State: " + getCurrentStateString() + "\n";
+    statusMsg += "Motion: " + std::string(motionBlocked ? "BLOCKED" : "ALLOWED") + "\n";
+    statusMsg += "Bad Count: " + std::to_string(badCount.load()) + "/" + std::to_string(freezeCount.load()) + "\n";
+    statusMsg += "Good Count: " + std::to_string(goodCount.load()) + "/" + std::to_string(recoverCount.load()) + "\n";
+    statusMsg += "=======================";
+    MetricsLogger::getInstance().logEvent("STATUS", statusMsg);
 }
