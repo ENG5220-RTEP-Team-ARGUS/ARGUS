@@ -234,7 +234,7 @@ fi
 
 forward_servo_console_output() {
     local line=""
-    while IFS= read -r -u "${SERVO_CONSOLE[0]}" line; do
+    while IFS= read -r -u "${SERVO_CONSOLE[0]}" line 2>/dev/null; do
         printf '%s\n' "$line"
     done
 }
