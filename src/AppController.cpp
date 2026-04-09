@@ -351,6 +351,23 @@ std::string formatLatencyMilliseconds(const std::optional<long long>& value) {
     return value.has_value() ? std::to_string(*value) : "N/A";
 }
 
+void logLiveLatencySample(const char* event_label,
+                          const RuntimeLatencyMetrics& metrics) {
+    std::cout << "[LIVE_TEST] latency event=" << event_label
+              << " vision_us=" << metrics.vision_us
+              << " unsafe_detect_ms="
+              << formatLatencyMilliseconds(metrics.unsafe_detect_ms)
+              << " freeze_pipeline_ms="
+              << formatLatencyMilliseconds(metrics.freeze_pipeline_ms)
+              << " freeze_cmd_ms="
+              << formatLatencyMilliseconds(metrics.freeze_cmd_ms)
+              << " total_stop_ms="
+              << formatLatencyMilliseconds(metrics.total_stop_ms)
+              << " ack_to_resume_ms="
+              << formatLatencyMilliseconds(metrics.ack_to_resume_ms)
+              << std::endl;
+}
+
 int uiPlainFontFace() {
 #ifdef CV_VERSION_MAJOR
     return cv::FONT_HERSHEY_PLAIN;
@@ -2411,6 +2428,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
             pending_unsafe_decision_timestamp.reset();
             std::cout << "[LIVE_TEST] freeze: "
                       << freezeReasonToString(pending_reason) << std::endl;
+            logLiveLatencySample("freeze", latency_metrics);
         });
 
         guardian->setOnClearFreezeCallback([&]() {
@@ -2428,6 +2446,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
             }
             motion_gate_open = true;
             std::cout << "[LIVE_TEST] resume" << std::endl;
+            logLiveLatencySample("resume", latency_metrics);
         });
 
         guardian->setOnStateChangeCallback([&](GuardianState from, GuardianState to) {
@@ -2677,12 +2696,19 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
                         GuardianState::SAFE_MONITORING) {
                     if (!frame_is_safe) {
                         if (!pending_unsafe_capture_timestamp.has_value()) {
+                            latency_metrics.unsafe_detect_ms.reset();
+                            latency_metrics.freeze_pipeline_ms.reset();
+                            latency_metrics.freeze_cmd_ms.reset();
+                            latency_metrics.total_stop_ms.reset();
+                            latency_metrics.ack_to_resume_ms.reset();
                             pending_unsafe_capture_timestamp =
                                 latest_frame_event.capture_timestamp;
                             pending_unsafe_decision_timestamp = result.timestamp;
                             latency_metrics.unsafe_detect_ms = elapsedMilliseconds(
                                 latest_frame_event.capture_timestamp,
                                 result.timestamp);
+                            logLiveLatencySample("unsafe_detect",
+                                                 latency_metrics);
                         }
                     } else {
                         pending_unsafe_capture_timestamp.reset();
