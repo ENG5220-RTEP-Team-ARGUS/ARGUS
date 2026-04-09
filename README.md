@@ -376,11 +376,11 @@ Runs a key-driven teleop wrapper on top of `--servo-console` so you can nudge jo
 
 Default keymap presets:
 - `azerty`: `d` / `q` base left/right, `z` / `s` upper forward/backward, `i` / `k` lower up/down, `l` / `j` grip open/close
-- `qwerty`: `d` / `a` base left/right, `w` / `s` upper forward/backward, `i` / `k` lower up/down, `l` / `j` grip open/close
+- `qwerty`: `a` rotate left (anti-clockwise), `d` rotate right (clockwise), `w` forward, `s` backward, `i` up, `k` down, `j` open, `l` close
 - `h`: home (all joints to 0)
 - `r`: status
 - `+` / `-`: increase / decrease step size
-- `x`: exit
+- `x`: go home, then exit
 
 Notes:
 - startup asks for keymap preset (`azerty`, `qwerty`, or `custom`)

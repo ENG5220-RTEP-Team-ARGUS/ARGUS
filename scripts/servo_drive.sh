@@ -209,6 +209,23 @@ echo
 
 coproc SERVO_CONSOLE { "$BIN" --servo-console; }
 
+if [[ -z "${SERVO_CONSOLE_PID:-}" ||
+      -z "${SERVO_CONSOLE[0]-}" ||
+      -z "${SERVO_CONSOLE[1]-}" ]]; then
+    echo "[DRIVE] Failed to start servo console subprocess." >&2
+    exit 1
+fi
+
+if ! : <&"${SERVO_CONSOLE[0]}" 2>/dev/null; then
+    echo "[DRIVE] Servo console output pipe is unavailable (bad file descriptor)." >&2
+    exit 1
+fi
+
+if ! : >&"${SERVO_CONSOLE[1]}" 2>/dev/null; then
+    echo "[DRIVE] Servo console input pipe is unavailable (bad file descriptor)." >&2
+    exit 1
+fi
+
 cat <&"${SERVO_CONSOLE[0]}" &
 SERVO_LOG_PID=$!
 
@@ -264,6 +281,12 @@ while true; do
             echo "[DRIVE] step=$STEP"
             ;;
         x)
+            BASE=0
+            LOWER=0
+            UPPER=0
+            GRIP=0
+            send_cmd "home"
+            print_status
             echo "[DRIVE] exit"
             break
             ;;
