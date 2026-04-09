@@ -1,0 +1,98 @@
+[LIVE_TEST] trying compliance camera backend first
+[LIVE_TEST] Starting live marker safety test mode
+[LIVE_TEST] Camera index: 0
+[LIVE_TEST] Expected marker ID: 23
+[LIVE_TEST] Camera backend preference: libcamera2opencv
+[LIVE_TEST] Auto operator ack: OFF
+[LIVE_TEST] Physical button = single-button control
+[LIVE_TEST] Controls: space/button=single-button control, a/r/d=aliases, 1/2/3=select routine, q=quit
+[LIVE_TEST] Starting in DISARMED setup mode
+[LIVE_TEST] Guardian thresholds: freeze after 30 consecutive bad frames, recover after 3 consecutive good frames.
+[LIVE_TEST] Routines: 1=FULL_SWEEP, 2=BASE_SCAN, 3=GRIP_PULSE
+[LIVE_TEST] Focus debug enabled: FOCUS_SCORE (Laplacian variance), higher usually means sharper marker edges.
+[2:23:14.938407964] [2817]  INFO Camera camera_manager.cpp:340 libcamera v0.7.0+rpt20260205
+[2:23:14.947667345] [2820]  INFO RPI pisp.cpp:720 libpisp version 1.3.0
+[2:23:15.013298092] [2820]  INFO IPAProxy ipa_proxy.cpp:180 Using tuning file /usr/share/libcamera/ipa/rpi/pisp/imx708.json
+[2:23:15.020892724] [2820]  INFO Camera camera_manager.cpp:223 Adding camera '/base/axi/pcie@1000120000/rp1/i2c@88000/imx708@1a' for pipeline handler rpi/pisp
+[2:23:15.020915761] [2820]  INFO RPI pisp.cpp:1181 Registered camera /base/axi/pcie@1000120000/rp1/i2c@88000/imx708@1a to CFE device /dev/media2 and ISP device /dev/media0 using PiSP variant BCM2712_C0
+Cams:
+ - /base/axi/pcie@1000120000/rp1/i2c@88000/imx708@1a
+Stream configuration adjusted to: 800x600-RGB888/sRGB
+[2:23:15.021229689] [2817]  INFO Camera camera.cpp:1215 configuring streams: (0) 800x600-RGB888/sRGB
+[2:23:15.021318504] [2820]  INFO RPI pisp.cpp:1485 Sensor: /base/axi/pcie@1000120000/rp1/i2c@88000/imx708@1a - Selected sensor format: 1536x864-SBGGR10_1X10/RAW - Selected CFE format: 1536x864-PC1B/RAW
+[CameraCapture] Opened via libcamera2opencv callback backend
+[LIVE_TEST] Camera backend active: libcamera2opencv (LIBCAMERA2OPENCV)
+[INIT] Guardian State Machine initialized with freezeCount=30, recoverCount=3
+[LIVE_TEST] Physical button module: configured (/dev/gpiochip0 named GPIO24 (offset 24), initial=RELEASED, debounce=50ms)
+QStandardPaths: runtime directory '/run/user/1000' is not owned by UID 0, but a directory permissions 0700 owned by UID 1000 GID 1000
+[LIVE_TEST] status: armed=NO safe=NO waiting=NO routine=1 vision=TOOL_NOT_DETECTED guardian=DISARMED_SETUP interlock=DISARMED motion_ctrl=DISABLED freeze_reason=N/A
+
+(ARGUS:2817): GLib-GObject-CRITICAL **: 17:39:47.490: g_object_unref: assertion 'G_IS_OBJECT (object)' failed
+[LIVE_TEST] status: armed=NO safe=YES waiting=NO routine=1 vision=SAFE guardian=DISARMED_SETUP interlock=DISARMED motion_ctrl=DISABLED freeze_reason=N/A
+[LIVE_TEST] status: armed=NO safe=NO waiting=NO routine=1 vision=TOOL_NOT_DETECTED guardian=DISARMED_SETUP interlock=DISARMED motion_ctrl=DISABLED freeze_reason=N/A
+[LIVE_TEST] status: armed=NO safe=YES waiting=NO routine=1 vision=SAFE guardian=DISARMED_SETUP interlock=DISARMED motion_ctrl=DISABLED freeze_reason=N/A
+[LIVE_TEST] status: armed=NO safe=NO waiting=NO routine=1 vision=TOOL_NOT_DETECTED guardian=DISARMED_SETUP interlock=DISARMED motion_ctrl=DISABLED freeze_reason=N/A
+[LIVE_TEST] status: armed=NO safe=YES waiting=NO routine=1 vision=SAFE guardian=DISARMED_SETUP interlock=DISARMED motion_ctrl=DISABLED freeze_reason=N/A
+[LIVE_TEST] status: armed=NO safe=NO waiting=NO routine=1 vision=TOOL_NOT_DETECTED guardian=DISARMED_SETUP interlock=DISARMED motion_ctrl=DISABLED freeze_reason=N/A
+[LIVE_TEST] status: armed=NO safe=YES waiting=NO routine=1 vision=SAFE guardian=DISARMED_SETUP interlock=DISARMED motion_ctrl=DISABLED freeze_reason=N/A
+[LIVE_TEST] status: armed=NO safe=NO waiting=NO routine=1 vision=TOOL_NOT_DETECTED guardian=DISARMED_SETUP interlock=DISARMED motion_ctrl=DISABLED freeze_reason=N/A
+[LIVE_TEST] status: armed=NO safe=YES waiting=NO routine=1 vision=SAFE guardian=DISARMED_SETUP interlock=DISARMED motion_ctrl=DISABLED freeze_reason=N/A
+[LIVE_TEST] status: armed=NO safe=NO waiting=NO routine=1 vision=TOOL_NOT_DETECTED guardian=DISARMED_SETUP interlock=DISARMED motion_ctrl=DISABLED freeze_reason=N/A
+[LIVE_TEST] status: armed=NO safe=YES waiting=NO routine=1 vision=SAFE guardian=DISARMED_SETUP interlock=DISARMED motion_ctrl=DISABLED freeze_reason=N/A
+[LIVE_TEST] status: armed=NO safe=NO waiting=NO routine=1 vision=TOOL_NOT_DETECTED guardian=DISARMED_SETUP interlock=DISARMED motion_ctrl=DISABLED freeze_reason=N/A
+[LIVE_TEST] status: armed=NO safe=NO waiting=NO routine=1 vision=OUTSIDE_ALLOWED_ZONE guardian=DISARMED_SETUP interlock=DISARMED motion_ctrl=DISABLED freeze_reason=N/A
+[LIVE_TEST] status: armed=NO safe=NO waiting=NO routine=1 vision=TOOL_NOT_DETECTED guardian=DISARMED_SETUP interlock=DISARMED motion_ctrl=DISABLED freeze_reason=N/A
+[LIVE_TEST] status: armed=NO safe=NO waiting=NO routine=1 vision=OUTSIDE_ALLOWED_ZONE guardian=DISARMED_SETUP interlock=DISARMED motion_ctrl=DISABLED freeze_reason=N/A
+[LIVE_TEST] status: armed=NO safe=NO waiting=NO routine=1 vision=TOOL_NOT_DETECTED guardian=DISARMED_SETUP interlock=DISARMED motion_ctrl=DISABLED freeze_reason=N/A
+[LIVE_TEST] status: armed=NO safe=NO waiting=NO routine=1 vision=OUTSIDE_ALLOWED_ZONE guardian=DISARMED_SETUP interlock=DISARMED motion_ctrl=DISABLED freeze_reason=N/A
+[LIVE_TEST] status: armed=NO safe=YES waiting=NO routine=1 vision=SAFE guardian=DISARMED_SETUP interlock=DISARMED motion_ctrl=DISABLED freeze_reason=N/A
+[LIVE_TEST] status: armed=NO safe=NO waiting=NO routine=1 vision=EXCESSIVE_SPEED guardian=DISARMED_SETUP interlock=DISARMED motion_ctrl=DISABLED freeze_reason=N/A
+[LIVE_TEST] status: armed=NO safe=YES waiting=NO routine=1 vision=SAFE guardian=DISARMED_SETUP interlock=DISARMED motion_ctrl=DISABLED freeze_reason=N/A
+[LIVE_TEST] status: armed=NO safe=NO waiting=NO routine=1 vision=EXCESSIVE_SPEED guardian=DISARMED_SETUP interlock=DISARMED motion_ctrl=DISABLED freeze_reason=N/A
+[LIVE_TEST] status: armed=NO safe=YES waiting=NO routine=1 vision=SAFE guardian=DISARMED_SETUP interlock=DISARMED motion_ctrl=DISABLED freeze_reason=N/A
+[BUTTON] ACK_REQUEST
+[INIT] Guardian State Machine initialized with freezeCount=30, recoverCount=3
+[LIVE_TEST] pose=HOME wait=1s
+[LIVE_TEST] ARM accepted: guardian enforcement is now ACTIVE.
+[LIVE_TEST] status: armed=YES safe=YES waiting=NO routine=1 vision=SAFE guardian=SAFE_MONITORING interlock=SAFE motion_ctrl=ENABLED freeze_reason=NONE
+[LIVE_TEST] pose=BASE +45 wait=1s
+[LIVE_TEST] latency event=unsafe_detect vision_us=2008 unsafe_detect_ms=2 freeze_pipeline_ms=N/A freeze_cmd_ms=N/A total_stop_ms=N/A ack_to_resume_ms=N/A
+[LIVE_TEST] status: armed=YES safe=NO waiting=NO routine=1 vision=EXCESSIVE_SPEED guardian=SAFE_MONITORING interlock=SAFE motion_ctrl=ENABLED freeze_reason=NONE
+[LIVE_TEST] status: armed=YES safe=YES waiting=NO routine=1 vision=SAFE guardian=SAFE_MONITORING interlock=SAFE motion_ctrl=ENABLED freeze_reason=NONE
+[LIVE_TEST] pose=BASE -45 wait=1s
+[LIVE_TEST] pose=HOME wait=1s
+[LIVE_TEST] pose=LOWER +45 wait=1s
+[LIVE_TEST] pose=LOWER -45 wait=1s
+[LIVE_TEST] latency event=unsafe_detect vision_us=2260 unsafe_detect_ms=2 freeze_pipeline_ms=N/A freeze_cmd_ms=N/A total_stop_ms=N/A ack_to_resume_ms=N/A
+[LIVE_TEST] status: armed=YES safe=NO waiting=NO routine=1 vision=TOOL_NOT_DETECTED guardian=SAFE_MONITORING interlock=SAFE motion_ctrl=ENABLED freeze_reason=NONE
+[LIVE_TEST] pose=HOME wait=1s
+[LIVE_TEST] freeze: MARKER_LOST
+[LIVE_TEST] latency event=freeze vision_us=2066 unsafe_detect_ms=2 freeze_pipeline_ms=967 freeze_cmd_ms=0 total_stop_ms=970 ack_to_resume_ms=N/A
+[ACTION] FREEZE_NOW - Motion blocked
+[GUARDIAN] SAFE_MONITORING -> FROZEN_UNSAFE
+[TRANSITION] SAFE_MONITORING -> FROZEN_UNSAFE | bad_count=30 good_count=0
+[LIVE_TEST] status: armed=YES safe=NO waiting=NO routine=1 vision=TOOL_NOT_DETECTED guardian=FROZEN_UNSAFE interlock=FROZEN motion_ctrl=DISABLED freeze_reason=MARKER_LOST
+[LIVE_TEST] waiting for continue
+[LIVE_TEST] status: armed=YES safe=YES waiting=YES routine=1 vision=SAFE guardian=FROZEN_UNSAFE interlock=FROZEN motion_ctrl=DISABLED freeze_reason=MARKER_LOST
+[BUTTON] ACK_REQUEST
+[OPERATOR] Acknowledgment received
+[GUARDIAN] FROZEN_UNSAFE -> RESET_PENDING
+[TRANSITION] FROZEN_UNSAFE -> RESET_PENDING | bad_count=30 good_count=0
+[LIVE_TEST] Operator acknowledge requested.
+[LIVE_TEST] status: armed=YES safe=YES waiting=YES routine=1 vision=SAFE guardian=RESET_PENDING interlock=FROZEN motion_ctrl=DISABLED freeze_reason=MARKER_LOST
+[LIVE_TEST] status: armed=YES safe=YES waiting=NO routine=1 vision=SAFE guardian=RESET_PENDING interlock=FROZEN motion_ctrl=DISABLED freeze_reason=MARKER_LOST
+[LIVE_TEST] resume
+[LIVE_TEST] latency event=resume vision_us=2969 unsafe_detect_ms=2 freeze_pipeline_ms=967 freeze_cmd_ms=0 total_stop_ms=970 ack_to_resume_ms=102
+[ACTION] CLEAR_FREEZE - Motion allowed
+[GUARDIAN] RESET_PENDING -> SAFE_MONITORING
+[TRANSITION] RESET_PENDING -> SAFE_MONITORING | bad_count=0 good_count=0
+[LIVE_TEST] status: armed=YES safe=YES waiting=NO routine=1 vision=SAFE guardian=SAFE_MONITORING interlock=SAFE motion_ctrl=ENABLED freeze_reason=NONE
+[LIVE_TEST] pose=UPPER +45 wait=1s
+[LIVE_TEST] pose=UPPER -45 wait=1s
+[LIVE_TEST] pose=HOME wait=1s
+[BUTTON] ACK_REQUEST
+[INIT] Guardian State Machine initialized with freezeCount=30, recoverCount=3
+[LIVE_TEST] DISARM accepted: guardian enforcement is now INACTIVE (setup/observation mode).
+[LIVE_TEST] status: armed=NO safe=YES waiting=NO routine=1 vision=SAFE guardian=DISARMED_SETUP interlock=DISARMED motion_ctrl=DISABLED freeze_reason=N/A
+[LIVE_TEST] Exit requested from display window (q).
+[LIVE_TEST] Frame stream ended.

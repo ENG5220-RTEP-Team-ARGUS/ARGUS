@@ -27,10 +27,10 @@ realtime/event-driven style shown in the Bernd Porr references.
 
 | Reference repo | Role for ARGUS | Current fit | Main gap | Planned action | Priority |
 | --- | --- | --- | --- | --- | --- |
-| `realtime_cpp_coding` | Compliance standard and design checklist | Partial | ARGUS still has polling-heavy control loops and ad hoc timing | Use as the top-level standard for all compliance decisions and document gaps against it | High |
-| `cppTimer` | Timer implementation source | High | Directly integrated, but button test still contains a small polling sleep | Vendor `cppTimer` under `third_party/` and use it as the timer primitive for control pacing | High |
-| `libcamera2opencv` | Camera backend source | High | Bundled backend is integrated, but still needs Pi validation and dependency availability | Vendor `libcamera2opencv` under `third_party/`, try it first in auto mode, and fall back to OpenCV/V4L2 only if it fails | High |
-| `cpp_event_callbacks` | Architectural guidance for event handoff | Medium | Top-level control still polls for button/camera/demo progression instead of receiving events | Refactor timer/frame/button flow toward callback-driven interfaces without redesigning the whole architecture | Medium |
+| `realtime_cpp_coding` | Compliance standard and design checklist | Partial | Top-level frame progression is still loop-driven even after timer/button event queue improvements | Keep using it as the top-level standard and close remaining event-flow gaps incrementally | High |
+| `cppTimer` | Timer implementation source | High | Directly integrated for pacing/backoff and button-test delay; needs repeated Pi runtime evidence | Keep `cppTimer` as the timer primitive and collect backend/runtime validation evidence | High |
+| `libcamera2opencv` | Camera backend source | High | Bundled backend is integrated, but still requires repeatable Pi validation in normal workflow | Keep `libcamera2opencv` first in auto mode, keep OpenCV/V4L2 fallback, and validate via backend-check mode | High |
+| `cpp_event_callbacks` | Architectural guidance for event handoff | Medium | Timer and button events now pass through explicit queued controller events, but frame flow is still consumed in loop order | Continue refactoring frame/timer/button handoff toward callback/event boundaries without architecture rewrite | Medium |
 | `rpi_pwm` | Alternative PWM path | Not applicable to current design | ARGUS uses PCA9685 over I2C, not Pi PWM GPIO18/19 | Document as out of scope unless motion hardware is redesigned | Low |
 
 ## File-Level Gap Assessment
@@ -39,19 +39,13 @@ realtime/event-driven style shown in the Bernd Porr references.
 
 Current compliance gaps:
 
-- uses `std::this_thread::sleep_for(...)` for:
-  - motion-home settle timing
-  - smoke-test dwell timing
-  - full-demo pacing
-  - retry pacing in interactive modes
-- contains polling loops for:
-  - button draining
-  - demo/live progression
+- still consumes camera frames in top-level control loops
+- still uses loop ordering for final event application in live/demo modes
 
 Compliance action:
 
-- replace sleep-driven periodic behavior with vendored `cppTimer`
-- move recurring events into explicit timer callbacks
+- keep vendored `cppTimer` for periodic timing/backoff
+- keep explicit queued timer/button events in the controller
 - keep `AppController` as orchestrator, but reduce loop-centric control
 
 ### `src/CameraCapture.cpp` and `include/CameraCapture.hpp`
@@ -74,13 +68,13 @@ Compliance action:
 
 Current compliance gaps:
 
-- button input is working, but consumed through polling from the controller
+- button input is working and now routed through an explicit controller event queue
+- the GPIO backend itself is still sampled by the controller loop
 
 Compliance action:
 
 - keep the GPIO character-device implementation
-- refactor how events are handed to `AppController` so button handling is more
-  explicitly event-driven
+- keep moving button/frame integration toward cleaner event-style boundaries
 
 ### `src/MotionController.cpp`
 
@@ -150,6 +144,6 @@ Licensing and attribution for those components is documented in
 
 ## Immediate Next Work
 
-1. Validate the vendored `cppTimer` path on the Pi.
-2. Validate the vendored `libcamera2opencv` backend on the Pi.
-3. Remove the remaining non-critical polling sleep in button test if needed.
+1. Run `scripts/camera_backend_check.sh` on the Pi and collect backend/frame summary evidence.
+2. Re-run `scripts/live_test.sh` and `scripts/full_demo.sh` on the Pi to confirm the queued timer/button event flow remains stable.
+3. Continue reducing loop-centric frame progression while keeping the current architecture and fallback paths intact.

@@ -1,0 +1,14 @@
+[CAMERA_CHECK] trying compliance camera backend first
+[CAMERA_CHECK] camera=0 backend_request=libcamera2opencv frames=60
+[CameraCapture] Opened via libcamera2opencv callback backend
+[CAMERA_CHECK] backend_active=libcamera2opencv (LIBCAMERA2OPENCV)
+[CAMERA_CHECK] first_frame_ms=23 size=640x480
+[CAMERA_CHECK] summary: frames=60 failures=0 sample_window_ms=1964 approx_fps=30.0 backend=libcamera2opencv (LIBCAMERA2OPENCV)
+[CAMERA_CHECK] compliance backend passed
+[CAMERA_CHECK] validating opencv fallback backend
+[CAMERA_CHECK] camera=0 backend_request=opencv frames=60
+[CameraCapture] libcamerify detected via LD_PRELOAD. Enforcing V4L2-first camera open policy.
+[CameraCapture] Opened via V4L2 device path /dev/video0 (backend: V4L2)
+[CAMERA_CHECK] backend_active=OpenCV VideoCapture (V4L2)
+[CAMERA_CHECK] first_frame_ms=96 size=640x480
+[CAMERA_CHECK] summary: frames=60 failures=0 sample_window_ms=1966 approx_fps=30.0 backend=OpenCV VideoCapture (V4L2)

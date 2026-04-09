@@ -1,4 +1,5 @@
 #include "CameraCapture.hpp"
+#include "CppTimerStdFuncCallback.h"
 
 #include <algorithm>
 #include <chrono>
@@ -11,7 +12,6 @@
 #include <memory>
 #include <mutex>
 #include <string>
-#include <thread>
 #include <vector>
 
 #if defined(ARGUS_HAVE_LIBCAM2OPENCV)
@@ -23,6 +23,35 @@ namespace {
 constexpr int kTargetFrameWidth = 640;
 constexpr int kTargetFrameHeight = 480;
 constexpr int kTargetFrameRate = 30;
+constexpr std::chrono::milliseconds kEmptyFrameRetryBackoff{20};
+
+bool waitForRetryBackoff(std::chrono::nanoseconds delay) {
+    if (delay.count() <= 0) {
+        return true;
+    }
+
+    std::mutex mutex;
+    std::condition_variable condition;
+    bool fired = false;
+
+    CppTimerCallback timer;
+    timer.registerEventCallback([&]() {
+        std::lock_guard<std::mutex> lock(mutex);
+        fired = true;
+        condition.notify_one();
+    });
+
+    try {
+        timer.startns(static_cast<long>(delay.count()), ONESHOT);
+    } catch (...) {
+        return false;
+    }
+
+    std::unique_lock<std::mutex> lock(mutex);
+    condition.wait(lock, [&]() { return fired; });
+    timer.stop();
+    return true;
+}
 
 std::vector<std::string> buildLibcameraPipelines() {
     // Ordered from stricter caps to more permissive fallback.
@@ -258,7 +287,7 @@ public:
                 break;
             }
 
-            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            (void)waitForRetryBackoff(kEmptyFrameRetryBackoff);
         }
 
         if (output_event.image_data.empty()) {
