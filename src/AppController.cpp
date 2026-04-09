@@ -2308,6 +2308,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
     bool motion_faulted = false;
     bool motion_gate_open = false;
     FreezeReason pending_reason = FreezeReason::UNKNOWN_FAULT;
+    FreezeReason pending_freeze_reason = FreezeReason::UNKNOWN_FAULT;
     SafetyState current_vision_state = SafetyState::SAFE;
     bool frame_is_safe = false;
     bool waiting_for_ack = false;
@@ -2318,6 +2319,12 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
     std::size_t next_routine_step_index = 0;
     SmokeJointOffsets current_pose_offsets = kSmokeHomePose;
     bool current_pose_offsets_known = false;
+    SmokeJointOffsets pose_slew_target = kSmokeHomePose;
+    bool pose_slew_active = false;
+    std::chrono::steady_clock::time_point next_pose_slew_due =
+        std::chrono::steady_clock::now();
+    bool freeze_command_pending = false;
+    std::optional<std::chrono::steady_clock::time_point> freeze_command_due;
     ControllerEventQueue control_events;
     CppTimerCallback live_step_timer;
     bool live_step_timer_started = false;
@@ -2328,28 +2335,67 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         pending_unsafe_decision_timestamp;
     std::optional<std::chrono::steady_clock::time_point> ack_request_timestamp;
 
+    auto applyPoseOffsets = [&](const SmokeJointOffsets& offsets,
+                                const char* context) -> bool {
+        bool target_clamped = false;
+        const MeArmJointTargets targets = makeDemoTargets(offsets, target_clamped);
+        if (!motion_controller_.setTargets(targets)) {
+            motion_faulted = true;
+            std::cerr << "[LIVE_TEST] failed to set pose (" << context << "): "
+                      << motion_controller_.lastErrorString() << std::endl;
+            return false;
+        }
+        return true;
+    };
+
     auto stagePose = [&](const DemoPoseStep& step) -> bool {
         bool clamped = false;
         const SmokeJointOffsets target_offsets =
             clampDemoOffsets(step.offsets, clamped);
-        SmokeJointOffsets start_offsets = current_pose_offsets;
-        if (!current_pose_offsets_known) {
-            start_offsets = target_offsets;
-        }
 
-        auto applyOffsets = [&](const SmokeJointOffsets& offsets,
-                                const char* context) -> bool {
-            bool target_clamped = false;
-            const MeArmJointTargets targets = makeDemoTargets(offsets, target_clamped);
-            if (!motion_controller_.setTargets(targets)) {
-                motion_faulted = true;
-                std::cerr << "[LIVE_TEST] failed to stage pose " << step.name
-                          << " (" << context << "): "
-                          << motion_controller_.lastErrorString() << std::endl;
+        if (!current_pose_offsets_known) {
+            current_pose_offsets = target_offsets;
+            current_pose_offsets_known = true;
+            if (!applyPoseOffsets(current_pose_offsets, "initial")) {
                 return false;
             }
+        }
+
+        pose_slew_target = target_offsets;
+        pose_slew_active =
+            (current_pose_offsets.base != pose_slew_target.base) ||
+            (current_pose_offsets.lower != pose_slew_target.lower) ||
+            (current_pose_offsets.upper != pose_slew_target.upper) ||
+            (current_pose_offsets.grip != pose_slew_target.grip);
+        next_pose_slew_due = std::chrono::steady_clock::now();
+
+        if (!pose_slew_active) {
+            if (!applyPoseOffsets(pose_slew_target, "hold")) {
+                return false;
+            }
+        }
+
+        current_pose_name = step.name;
+        std::cout << "[LIVE_TEST] pose=" << step.name;
+        if (clamped) {
+            std::cout << " [clamped]";
+        }
+        if (pose_slew_active) {
+            std::cout << " [slew]";
+        }
+        std::cout << " wait=1s" << std::endl;
+        return true;
+    };
+
+    auto advancePoseSlew = [&]() -> bool {
+        if (!pose_slew_active) {
             return true;
-        };
+        }
+
+        const auto now = std::chrono::steady_clock::now();
+        if (now < next_pose_slew_due) {
+            return true;
+        }
 
         auto stepTowards = [&](int current, int target) {
             if (current < target) {
@@ -2361,46 +2407,23 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
             return current;
         };
 
-        SmokeJointOffsets next_offsets = start_offsets;
-        bool moved = false;
-        while (next_offsets.base != target_offsets.base ||
-               next_offsets.lower != target_offsets.lower ||
-               next_offsets.upper != target_offsets.upper ||
-               next_offsets.grip != target_offsets.grip) {
-            moved = true;
-            next_offsets.base = stepTowards(next_offsets.base, target_offsets.base);
-            next_offsets.lower = stepTowards(next_offsets.lower, target_offsets.lower);
-            next_offsets.upper = stepTowards(next_offsets.upper, target_offsets.upper);
-            next_offsets.grip = stepTowards(next_offsets.grip, target_offsets.grip);
+        SmokeJointOffsets next_offsets = current_pose_offsets;
+        next_offsets.base = stepTowards(next_offsets.base, pose_slew_target.base);
+        next_offsets.lower = stepTowards(next_offsets.lower, pose_slew_target.lower);
+        next_offsets.upper = stepTowards(next_offsets.upper, pose_slew_target.upper);
+        next_offsets.grip = stepTowards(next_offsets.grip, pose_slew_target.grip);
 
-            if (!applyOffsets(next_offsets, "slew")) {
-                return false;
-            }
-
-            std::string timer_error;
-            if (!waitForCppTimerDelay(kDemoSlewStepInterval, timer_error)) {
-                motion_faulted = true;
-                std::cerr << "[LIVE_TEST] pose slew timer failed: " << timer_error
-                          << std::endl;
-                return false;
-            }
+        if (!applyPoseOffsets(next_offsets, "slew")) {
+            return false;
         }
 
-        if (!moved) {
-            if (!applyOffsets(target_offsets, "direct")) {
-                return false;
-            }
-        }
-
-        current_pose_offsets = target_offsets;
-        current_pose_offsets_known = true;
-
-        current_pose_name = step.name;
-        std::cout << "[LIVE_TEST] pose=" << step.name;
-        if (clamped) {
-            std::cout << " [clamped]";
-        }
-        std::cout << " wait=1s" << std::endl;
+        current_pose_offsets = next_offsets;
+        pose_slew_active =
+            (current_pose_offsets.base != pose_slew_target.base) ||
+            (current_pose_offsets.lower != pose_slew_target.lower) ||
+            (current_pose_offsets.upper != pose_slew_target.upper) ||
+            (current_pose_offsets.grip != pose_slew_target.grip);
+        next_pose_slew_due = now + kDemoSlewStepInterval;
         return true;
     };
 
@@ -2470,6 +2493,9 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
 
     auto resetEnforcementState = [&]() {
         pending_reason = FreezeReason::UNKNOWN_FAULT;
+        pending_freeze_reason = FreezeReason::UNKNOWN_FAULT;
+        freeze_command_pending = false;
+        freeze_command_due.reset();
         guardian = std::make_unique<GuardianStateMachine>(
             kLiveFreezeBadFrameThreshold,
             kLiveRecoverGoodFrameThreshold);
@@ -2484,38 +2510,23 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
             }
             stopLiveStepTimer();
             next_routine_step_index = 0;
+            pending_freeze_reason = pending_reason;
             if (guardian_armed) {
                 std::cout << "[LIVE_TEST] unsafe received: retracting to safe pose"
                           << std::endl;
                 if (!stagePose(kSurgeryRetractStep)) {
                     motion_faulted = true;
-                } else {
-                    std::string timer_error;
-                    if (!waitForCppTimerDelay(kSurgeryRetractDwell, timer_error)) {
-                        motion_faulted = true;
-                        std::cerr << "[LIVE_TEST] retract dwell failed: "
-                                  << timer_error << std::endl;
-                    }
                 }
             }
+            freeze_command_pending = true;
+            freeze_command_due =
+                std::chrono::steady_clock::now() + kSurgeryRetractDwell;
             motion_gate_open = false;
             waiting_for_ack = false;
             waiting_for_ack_announced = false;
-            interlock->onControlEvent(ControlEvent::FREEZE_NOW, pending_reason);
-            const auto freeze_callback_end = std::chrono::steady_clock::now();
-            latency_metrics.freeze_cmd_ms = elapsedMilliseconds(
-                freeze_callback_start,
-                freeze_callback_end);
-            if (pending_unsafe_capture_timestamp.has_value()) {
-                latency_metrics.total_stop_ms = elapsedMilliseconds(
-                    *pending_unsafe_capture_timestamp,
-                    freeze_callback_end);
-            }
-            pending_unsafe_capture_timestamp.reset();
-            pending_unsafe_decision_timestamp.reset();
-            std::cout << "[LIVE_TEST] freeze: "
-                      << freezeReasonToString(pending_reason) << std::endl;
-            logLiveLatencySample("freeze", latency_metrics);
+            std::cout
+                << "[LIVE_TEST] freeze pending: will hold after retract dwell"
+                << std::endl;
         });
 
         guardian->setOnClearFreezeCallback([&]() {
@@ -2547,6 +2558,41 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
     };
 
     resetEnforcementState();
+
+    auto processPendingFreezeCommand = [&]() -> bool {
+        if (!freeze_command_pending || !freeze_command_due.has_value()) {
+            return true;
+        }
+
+        const auto now = std::chrono::steady_clock::now();
+        if (now < *freeze_command_due) {
+            return true;
+        }
+
+        freeze_command_pending = false;
+        freeze_command_due.reset();
+        const auto freeze_cmd_start = std::chrono::steady_clock::now();
+        interlock->onControlEvent(ControlEvent::FREEZE_NOW, pending_freeze_reason);
+        const auto freeze_cmd_end = std::chrono::steady_clock::now();
+        latency_metrics.freeze_cmd_ms = elapsedMilliseconds(freeze_cmd_start,
+                                                            freeze_cmd_end);
+        if (pending_unsafe_capture_timestamp.has_value()) {
+            latency_metrics.total_stop_ms = elapsedMilliseconds(
+                *pending_unsafe_capture_timestamp,
+                freeze_cmd_end);
+        }
+        pending_unsafe_capture_timestamp.reset();
+        pending_unsafe_decision_timestamp.reset();
+        std::cout << "[LIVE_TEST] freeze: "
+                  << freezeReasonToString(pending_freeze_reason) << std::endl;
+        logLiveLatencySample("freeze", latency_metrics);
+
+        if (interlock->state() == InterlockState::FAULT) {
+            motion_faulted = true;
+            return false;
+        }
+        return true;
+    };
 
     PhysicalButtonModule button_module;
     std::cout << "[LIVE_TEST] Physical button module: "
@@ -2630,6 +2676,8 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         ack_request_timestamp.reset();
         pending_unsafe_capture_timestamp.reset();
         pending_unsafe_decision_timestamp.reset();
+        freeze_command_pending = false;
+        freeze_command_due.reset();
         std::cout << "[LIVE_TEST] ARM accepted: guardian enforcement is now ACTIVE."
                   << std::endl;
         return true;
@@ -2654,6 +2702,9 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         ack_request_timestamp.reset();
         pending_unsafe_capture_timestamp.reset();
         pending_unsafe_decision_timestamp.reset();
+        freeze_command_pending = false;
+        freeze_command_due.reset();
+        pose_slew_active = false;
         next_routine_step_index = 0;
         current_pose_name = "HOLD";
         resetEnforcementState();
@@ -2666,6 +2717,12 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
     auto requestAcknowledge = [&]() -> bool {
         if (!guardian_armed) {
             std::cout << "[LIVE_TEST] ACK request ignored: guardian is disarmed."
+                      << std::endl;
+            return true;
+        }
+
+        if (freeze_command_pending) {
+            std::cout << "[LIVE_TEST] ACK request ignored: retract in progress."
                       << std::endl;
             return true;
         }
@@ -2813,6 +2870,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
                 announceWaitingState();
 
                 if (guardian_armed && options.auto_ack &&
+                    !freeze_command_pending &&
                     guardian->getState() == GuardianState::FROZEN_UNSAFE) {
                     ack_request_timestamp = std::chrono::steady_clock::now();
                     guardian->operatorAcknowledge();
@@ -2921,6 +2979,16 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         }
 
         if (!control_events.drain(handleControlEvent)) {
+            motion_faulted = true;
+            break;
+        }
+
+        if (!advancePoseSlew()) {
+            motion_faulted = true;
+            break;
+        }
+
+        if (!processPendingFreezeCommand()) {
             motion_faulted = true;
             break;
         }
