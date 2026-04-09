@@ -380,13 +380,14 @@ Default keymap presets:
 - `h`: home (all joints to 0)
 - `r`: status
 - `+` / `-`: increase / decrease step size
-- `x`: go home, then exit
+- `x`: go home, wait briefly, then exit
 
 Notes:
 - startup asks for keymap preset (`azerty`, `qwerty`, or `custom`)
 - `custom` asks one binding at a time
 - default step is `5` logical degrees
 - override step with `ARGUS_SERVO_STEP` (for example `ARGUS_SERVO_STEP=2 ./scripts/servo_drive.sh`)
+- default exit-home wait is `1.0s`; override with `ARGUS_SERVO_EXIT_HOME_WAIT_S`
 - skip startup prompt with `ARGUS_SERVO_KEYMAP=azerty` or `ARGUS_SERVO_KEYMAP=qwerty`
 - logical range is clamped to `-90..+90`
 

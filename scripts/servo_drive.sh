@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN="${ARGUS_BIN:-$ROOT_DIR/build/ARGUS}"
 STEP="${ARGUS_SERVO_STEP:-5}"
+EXIT_HOME_WAIT_S="${ARGUS_SERVO_EXIT_HOME_WAIT_S:-1.0}"
 
 if [[ ! -x "$BIN" ]]; then
     echo "Build the binary first: cmake -S . -B build && cmake --build build -j$(nproc)" >&2
@@ -12,6 +13,11 @@ fi
 
 if ! [[ "$STEP" =~ ^[0-9]+$ ]] || (( STEP <= 0 )); then
     echo "ARGUS_SERVO_STEP must be a positive integer (current: $STEP)" >&2
+    exit 1
+fi
+
+if ! [[ "$EXIT_HOME_WAIT_S" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    echo "ARGUS_SERVO_EXIT_HOME_WAIT_S must be a non-negative number (current: $EXIT_HOME_WAIT_S)" >&2
     exit 1
 fi
 
@@ -226,7 +232,14 @@ if ! : >&"${SERVO_CONSOLE[1]}" 2>/dev/null; then
     exit 1
 fi
 
-cat <&"${SERVO_CONSOLE[0]}" &
+forward_servo_console_output() {
+    local line=""
+    while IFS= read -r -u "${SERVO_CONSOLE[0]}" line; do
+        printf '%s\n' "$line"
+    done
+}
+
+forward_servo_console_output &
 SERVO_LOG_PID=$!
 
 cleanup() {
@@ -287,6 +300,10 @@ while true; do
             GRIP=0
             send_cmd "home"
             print_status
+            if [[ "$EXIT_HOME_WAIT_S" != "0" ]]; then
+                echo "[DRIVE] waiting ${EXIT_HOME_WAIT_S}s for home settle"
+                sleep "$EXIT_HOME_WAIT_S"
+            fi
             echo "[DRIVE] exit"
             break
             ;;
