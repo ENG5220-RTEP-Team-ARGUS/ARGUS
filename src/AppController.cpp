@@ -74,6 +74,12 @@ constexpr int kDemoLowerStep = 45;
 constexpr int kDemoUpperStep = 45;
 constexpr int kDemoGripStep = 45;
 constexpr std::chrono::milliseconds kCaptureRetryBackoff{50};
+constexpr std::chrono::milliseconds kSurgeryRetractDwell{350};
+constexpr int kSurgeryForwardOffset = 22;
+constexpr int kSurgeryBackwardOffset = -22;
+constexpr int kSurgeryPassOneDepthOffset = -12;
+constexpr int kSurgeryPassTwoDepthOffset = -24;
+constexpr int kSurgeryPassThreeDepthOffset = -36;
 
 class MotionControllerHardwareAdapter final : public RobotHardware {
 public:
@@ -1054,6 +1060,7 @@ constexpr std::array<JointPulseCalibration, MotionController::kServoCount>
     }};
 
 constexpr SmokeJointOffsets kSmokeHomePose{0, 0, 0, 0};
+constexpr SmokeJointOffsets kSurgeryRetractPose{0, 35, -30, 0};
 
 struct DemoPoseStep {
     const char* name;
@@ -1068,19 +1075,19 @@ struct LiveRoutineDefinition {
 };
 
 constexpr DemoPoseStep kDemoHomeStep{"HOME", kSmokeHomePose};
+constexpr DemoPoseStep kSurgeryRetractStep{"RETRACT_SAFE", kSurgeryRetractPose};
 
-constexpr std::array<DemoPoseStep, 12> kDemoSequence = {{
-    {"BASE +45", {kDemoBaseStep, 0, 0, 0}},
-    {"BASE -45", {-kDemoBaseStep, 0, 0, 0}},
+constexpr std::array<DemoPoseStep, 11> kLiveSurgeryCutSequence = {{
     {"HOME", {0, 0, 0, 0}},
-    {"LOWER +45", {0, kDemoLowerStep, 0, 0}},
-    {"LOWER -45", {0, -kDemoLowerStep, 0, 0}},
-    {"HOME", {0, 0, 0, 0}},
-    {"UPPER +45", {0, 0, kDemoUpperStep, 0}},
-    {"UPPER -45", {0, 0, -kDemoUpperStep, 0}},
-    {"HOME", {0, 0, 0, 0}},
-    {"GRIP +45", {0, 0, 0, kDemoGripStep}},
-    {"GRIP -45", {0, 0, 0, -kDemoGripStep}},
+    {"CUT P1 FORWARD", {0, 0, kSurgeryForwardOffset, 0}},
+    {"CUT P1 DOWN", {0, kSurgeryPassOneDepthOffset, kSurgeryForwardOffset, 0}},
+    {"CUT P1 BACKWARD", {0, kSurgeryPassOneDepthOffset, kSurgeryBackwardOffset, 0}},
+    {"CUT P2 FORWARD", {0, 0, kSurgeryForwardOffset, 0}},
+    {"CUT P2 DOWN (DEEPER)", {0, kSurgeryPassTwoDepthOffset, kSurgeryForwardOffset, 0}},
+    {"CUT P2 BACKWARD", {0, kSurgeryPassTwoDepthOffset, kSurgeryBackwardOffset, 0}},
+    {"CUT P3 FORWARD", {0, 0, kSurgeryForwardOffset, 0}},
+    {"CUT P3 DOWN (FAILURE PASS)", {0, kSurgeryPassThreeDepthOffset, kSurgeryForwardOffset, 0}},
+    {"CUT P3 BACKWARD", {0, kSurgeryPassThreeDepthOffset, kSurgeryBackwardOffset, 0}},
     {"HOME", {0, 0, 0, 0}},
 }};
 
@@ -1114,7 +1121,10 @@ LiveRoutineDefinition getLiveRoutineDefinition(std::size_t index) {
                     kLiveGripPulseSequence.size()};
         case 0:
         default:
-            return {1, "FULL_SWEEP", kDemoSequence.data(), kDemoSequence.size()};
+            return {1,
+                    "SURGERY_CUT",
+                    kLiveSurgeryCutSequence.data(),
+                    kLiveSurgeryCutSequence.size()};
     }
 }
 
@@ -2260,7 +2270,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         << " consecutive bad frames, recover after "
         << kLiveRecoverGoodFrameThreshold
         << " consecutive good frames.\n"
-        << "[LIVE_TEST] Routines: 1=FULL_SWEEP, 2=BASE_SCAN, 3=GRIP_PULSE\n"
+        << "[LIVE_TEST] Routines: 1=SURGERY_CUT, 2=BASE_SCAN, 3=GRIP_PULSE\n"
         << "[LIVE_TEST] Focus debug enabled: FOCUS_SCORE (Laplacian variance), "
            "higher usually means sharper marker edges.\n";
 
@@ -2411,6 +2421,22 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
                     *pending_unsafe_decision_timestamp,
                     freeze_callback_start);
             }
+            stopLiveStepTimer();
+            next_routine_step_index = 0;
+            if (guardian_armed) {
+                std::cout << "[LIVE_TEST] unsafe received: retracting to safe pose"
+                          << std::endl;
+                if (!stagePose(kSurgeryRetractStep)) {
+                    motion_faulted = true;
+                } else {
+                    std::string timer_error;
+                    if (!waitForCppTimerDelay(kSurgeryRetractDwell, timer_error)) {
+                        motion_faulted = true;
+                        std::cerr << "[LIVE_TEST] retract dwell failed: "
+                                  << timer_error << std::endl;
+                    }
+                }
+            }
             motion_gate_open = false;
             waiting_for_ack = false;
             waiting_for_ack_announced = false;
@@ -2441,6 +2467,10 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
             }
             ack_request_timestamp.reset();
             if (interlock->state() == InterlockState::FAULT) {
+                motion_faulted = true;
+                return;
+            }
+            if (!startLiveStepTimer()) {
                 motion_faulted = true;
                 return;
             }
