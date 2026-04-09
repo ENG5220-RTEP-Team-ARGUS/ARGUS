@@ -26,6 +26,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace {
 
@@ -197,46 +198,389 @@ std::string formatLatencyMilliseconds(const std::optional<long long>& value) {
     return value.has_value() ? std::to_string(*value) : "N/A";
 }
 
-void drawLatencyOverlay(cv::Mat& frame,
-                        const RuntimeLatencyMetrics& metrics,
-                        int start_y) {
-    constexpr int kX = 16;
-    constexpr int kSpacing = 24;
-    constexpr double kFontScale = 0.55;
-    const cv::Scalar label_color(200, 200, 200);
-    const cv::Scalar value_color(255, 255, 255);
+int uiPlainFontFace() {
+#ifdef CV_VERSION_MAJOR
+    return cv::FONT_HERSHEY_PLAIN;
+#else
+    return cv::FONT_HERSHEY_SIMPLEX;
+#endif
+}
+
+int frameWidth(const cv::Mat& frame) {
+#ifdef CV_VERSION_MAJOR
+    return frame.cols;
+#else
+    (void)frame;
+    return 640;
+#endif
+}
+
+int frameHeight(const cv::Mat& frame) {
+#ifdef CV_VERSION_MAJOR
+    return frame.rows;
+#else
+    (void)frame;
+    return 480;
+#endif
+}
+
+void drawRectangle(cv::Mat& frame,
+                   cv::Point top_left,
+                   cv::Point bottom_right,
+                   const cv::Scalar& color,
+                   int thickness) {
+#ifdef CV_VERSION_MAJOR
+    cv::rectangle(frame, top_left, bottom_right, color, thickness);
+#else
+    (void)frame;
+    (void)top_left;
+    (void)bottom_right;
+    (void)color;
+    (void)thickness;
+#endif
+}
+
+void drawLine(cv::Mat& frame,
+              cv::Point from,
+              cv::Point to,
+              const cv::Scalar& color,
+              int thickness) {
+#ifdef CV_VERSION_MAJOR
+    cv::line(frame, from, to, color, thickness);
+#else
+    (void)frame;
+    (void)from;
+    (void)to;
+    (void)color;
+    (void)thickness;
+#endif
+}
+
+struct SupervisoryUiRow {
+    std::string label;
+    std::string value;
+    cv::Scalar value_color;
+};
+
+struct SupervisoryUiModel {
+    std::string mode_title;
+    std::string state_label;
+    std::string state_description;
+    cv::Scalar state_color;
+    std::string motion_label;
+    cv::Scalar motion_color;
+    std::string operator_prompt;
+    std::string next_action;
+    std::string freeze_reason;
+    std::string footer_info;
+    RuntimeLatencyMetrics latency;
+    std::vector<SupervisoryUiRow> status_rows;
+    bool show_focus = false;
+    std::string focus_label;
+    cv::Scalar focus_color;
+    bool emphasise_danger = false;
+};
+
+cv::Scalar severityColor(const std::string& value) {
+    if (value.find("FAULT") != std::string::npos ||
+        value.find("FROZEN") != std::string::npos ||
+        value.find("UNSAFE") != std::string::npos ||
+        value.find("DETECTED") != std::string::npos ||
+        value.find("OUTSIDE") != std::string::npos) {
+        return cv::Scalar(60, 60, 200);
+    }
+    if (value.find("WAIT") != std::string::npos ||
+        value.find("PENDING") != std::string::npos ||
+        value.find("BLOCKED") != std::string::npos) {
+        return cv::Scalar(50, 180, 230);
+    }
+    if (value.find("SAFE") != std::string::npos ||
+        value.find("ALLOWED") != std::string::npos ||
+        value.find("RUNNING") != std::string::npos ||
+        value.find("READY") != std::string::npos) {
+        return cv::Scalar(60, 170, 80);
+    }
+    return cv::Scalar(25, 25, 25);
+}
+
+void drawPanel(cv::Mat& frame,
+               cv::Point top_left,
+               cv::Point bottom_right,
+               const cv::Scalar& fill,
+               const cv::Scalar& border) {
+    drawRectangle(frame, top_left, bottom_right, fill, -1);
+    drawRectangle(frame, top_left, bottom_right, border, 1);
+}
+
+void drawSupervisoryGui(cv::Mat& frame, const SupervisoryUiModel& model) {
+    if (frame.empty()) {
+        return;
+    }
+
+    const int width = frameWidth(frame);
+    const int height = frameHeight(frame);
+    const int header_height = std::max(36, height / 13);
+    const int left_width = std::max(160, width / 4);
+    const int right_width = std::max(180, width / 4);
+    const int panel_top = header_height + 8;
+    const int panel_bottom = height - 8;
+    const int left_x2 = left_width;
+    const int right_x1 = width - right_width;
+
+    const cv::Scalar panel_fill(245, 245, 245);
+    const cv::Scalar panel_border(220, 220, 220);
+    const cv::Scalar primary_text(25, 25, 25);
+    const cv::Scalar muted_text(120, 120, 120);
+    const cv::Scalar info_color(170, 140, 60);
+
+    drawPanel(frame,
+              cv::Point(0, 0),
+              cv::Point(width - 1, header_height),
+              panel_fill,
+              panel_border);
+    drawPanel(frame,
+              cv::Point(0, panel_top),
+              cv::Point(left_x2, panel_bottom),
+              panel_fill,
+              panel_border);
+    drawPanel(frame,
+              cv::Point(right_x1, panel_top),
+              cv::Point(width - 1, panel_bottom),
+              panel_fill,
+              panel_border);
 
     cv::putText(frame,
-                "LATENCY: vision_us=" + std::to_string(metrics.vision_us) +
-                    " unsafe_detect_ms=" +
-                    formatLatencyMilliseconds(metrics.unsafe_detect_ms),
-                cv::Point(kX, start_y),
+                "ARGUS | " + model.mode_title,
+                cv::Point(16, 26),
                 cv::FONT_HERSHEY_SIMPLEX,
-                kFontScale,
-                label_color,
+                0.65,
+                primary_text,
+                2);
+    cv::putText(frame,
+                "Operator -> " + model.operator_prompt,
+                cv::Point(right_x1 + 12, 26),
+                cv::FONT_HERSHEY_SIMPLEX,
+                0.48,
+                primary_text,
+                1);
+
+    int y = panel_top + 24;
+    cv::putText(frame,
+                "SAFETY STATE",
+                cv::Point(16, y),
+                cv::FONT_HERSHEY_SIMPLEX,
+                0.45,
+                muted_text,
+                1);
+    y += 32;
+    cv::putText(frame,
+                model.state_label,
+                cv::Point(16, y),
+                cv::FONT_HERSHEY_SIMPLEX,
+                1.0,
+                model.state_color,
+                3);
+    y += 24;
+    cv::putText(frame,
+                model.state_description,
+                cv::Point(16, y),
+                uiPlainFontFace(),
+                1.0,
+                primary_text,
+                1);
+
+    y += 26;
+    drawLine(frame, cv::Point(12, y), cv::Point(left_x2 - 12, y), panel_border, 1);
+    y += 20;
+    cv::putText(frame,
+                "MOTION GATE",
+                cv::Point(16, y),
+                cv::FONT_HERSHEY_SIMPLEX,
+                0.45,
+                muted_text,
+                1);
+    y += 28;
+    cv::putText(frame,
+                model.motion_label,
+                cv::Point(16, y),
+                cv::FONT_HERSHEY_SIMPLEX,
+                0.9,
+                model.motion_color,
+                2);
+
+    y += 24;
+    drawLine(frame, cv::Point(12, y), cv::Point(left_x2 - 12, y), panel_border, 1);
+    y += 20;
+    cv::putText(frame,
+                "NEXT ACTION",
+                cv::Point(16, y),
+                cv::FONT_HERSHEY_SIMPLEX,
+                0.45,
+                muted_text,
+                1);
+    y += 24;
+    cv::putText(frame,
+                model.next_action,
+                cv::Point(16, y),
+                uiPlainFontFace(),
+                1.2,
+                primary_text,
+                1);
+
+    y += 22;
+    drawLine(frame, cv::Point(12, y), cv::Point(left_x2 - 12, y), panel_border, 1);
+    y += 20;
+    cv::putText(frame,
+                "FREEZE REASON",
+                cv::Point(16, y),
+                cv::FONT_HERSHEY_SIMPLEX,
+                0.45,
+                muted_text,
+                1);
+    y += 24;
+    cv::putText(frame,
+                model.freeze_reason,
+                cv::Point(16, y),
+                uiPlainFontFace(),
+                1.1,
+                severityColor(model.freeze_reason),
+                1);
+
+    int rx = right_x1 + 12;
+    int ry = panel_top + 24;
+    cv::putText(frame,
+                "SUBSYSTEMS",
+                cv::Point(rx, ry),
+                cv::FONT_HERSHEY_SIMPLEX,
+                0.45,
+                muted_text,
+                1);
+    ry += 18;
+    drawLine(frame,
+             cv::Point(right_x1 + 10, ry),
+             cv::Point(width - 12, ry),
+             panel_border,
+             1);
+    ry += 18;
+
+    for (const auto& row : model.status_rows) {
+        cv::putText(frame,
+                    row.label,
+                    cv::Point(rx, ry),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.42,
+                    muted_text,
+                    1);
+        ry += 14;
+        cv::putText(frame,
+                    row.value,
+                    cv::Point(rx, ry),
+                    uiPlainFontFace(),
+                    1.0,
+                    row.value_color,
+                    1);
+        ry += 16;
+    }
+
+    if (model.show_focus) {
+        drawLine(frame,
+                 cv::Point(right_x1 + 10, ry),
+                 cv::Point(width - 12, ry),
+                 panel_border,
+                 1);
+        ry += 20;
+        cv::putText(frame,
+                    "FOCUS",
+                    cv::Point(rx, ry),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.45,
+                    muted_text,
+                    1);
+        ry += 18;
+        cv::putText(frame,
+                    model.focus_label,
+                    cv::Point(rx, ry),
+                    uiPlainFontFace(),
+                    1.0,
+                    model.focus_color,
+                    1);
+        ry += 18;
+    }
+
+    drawLine(frame,
+             cv::Point(right_x1 + 10, ry),
+             cv::Point(width - 12, ry),
+             panel_border,
+             1);
+    ry += 20;
+    cv::putText(frame,
+                "LATENCY",
+                cv::Point(rx, ry),
+                cv::FONT_HERSHEY_SIMPLEX,
+                0.45,
+                muted_text,
+                1);
+    ry += 18;
+    cv::putText(frame,
+                "vision_us " + std::to_string(model.latency.vision_us),
+                cv::Point(rx, ry),
+                uiPlainFontFace(),
+                1.0,
+                primary_text,
+                1);
+    ry += 16;
+    cv::putText(frame,
+                "unsafe_ms " +
+                    formatLatencyMilliseconds(model.latency.unsafe_detect_ms),
+                cv::Point(rx, ry),
+                uiPlainFontFace(),
+                1.0,
+                info_color,
+                1);
+    ry += 16;
+    cv::putText(frame,
+                "stop_ms " +
+                    formatLatencyMilliseconds(model.latency.total_stop_ms),
+                cv::Point(rx, ry),
+                uiPlainFontFace(),
+                1.0,
+                severityColor(formatLatencyMilliseconds(model.latency.total_stop_ms)),
+                1);
+    ry += 16;
+    cv::putText(frame,
+                "freeze_cmd_ms " +
+                    formatLatencyMilliseconds(model.latency.freeze_cmd_ms),
+                cv::Point(rx, ry),
+                uiPlainFontFace(),
+                1.0,
+                primary_text,
+                1);
+    ry += 16;
+    cv::putText(frame,
+                "ack_resume_ms " +
+                    formatLatencyMilliseconds(model.latency.ack_to_resume_ms),
+                cv::Point(rx, ry),
+                uiPlainFontFace(),
+                1.0,
+                primary_text,
                 1);
 
     cv::putText(frame,
-                "FREEZE: pipeline_ms=" +
-                    formatLatencyMilliseconds(metrics.freeze_pipeline_ms) +
-                    " cmd_ms=" +
-                    formatLatencyMilliseconds(metrics.freeze_cmd_ms) +
-                    " total_stop_ms=" +
-                    formatLatencyMilliseconds(metrics.total_stop_ms),
-                cv::Point(kX, start_y + kSpacing),
-                cv::FONT_HERSHEY_SIMPLEX,
-                kFontScale,
-                value_color,
+                model.footer_info,
+                cv::Point(16, height - 14),
+                uiPlainFontFace(),
+                0.9,
+                muted_text,
                 1);
 
-    cv::putText(frame,
-                "RESUME: ack_to_resume_ms=" +
-                    formatLatencyMilliseconds(metrics.ack_to_resume_ms),
-                cv::Point(kX, start_y + 2 * kSpacing),
-                cv::FONT_HERSHEY_SIMPLEX,
-                kFontScale,
-                value_color,
-                1);
+    const cv::Scalar border_color =
+        model.emphasise_danger ? cv::Scalar(60, 60, 200) : model.state_color;
+    const int border_thickness = model.emphasise_danger ? 5 : 3;
+    drawRectangle(frame,
+                  cv::Point(2, 2),
+                  cv::Point(width - 3, height - 3),
+                  border_color,
+                  border_thickness);
 }
 
 const char* safetyStateToString(SafetyState state) {
@@ -1940,66 +2284,79 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
         } else if (scene_is_safe) {
             demo_state_text = "SAFE_READY";
         }
+        cv::Scalar state_color(170, 140, 60);
+        std::string state_label = "SETUP";
+        std::string state_description = "Waiting for safe scene";
+        std::string next_action = "MAKE SCENE SAFE";
+        if (demo_state_text == "READY_TO_ARM") {
+            state_label = "READY";
+            state_color = cv::Scalar(60, 170, 80);
+            state_description = "Scene safe and motion blocked";
+            next_action = "PRESS CONTROL TO START";
+        } else if (demo_state_text == "RUNNING") {
+            state_label = "RUNNING";
+            state_color = cv::Scalar(60, 170, 80);
+            state_description = "Guard active and motion allowed";
+            next_action = "MONITOR";
+        } else if (demo_state_text == "WAIT_ACK") {
+            state_label = "WAITING";
+            state_color = cv::Scalar(50, 180, 230);
+            state_description = "Safe again, waiting for control";
+            next_action = "PRESS CONTROL TO RESUME";
+        } else if (demo_state_text == "FROZEN") {
+            state_label = "FROZEN";
+            state_color = cv::Scalar(60, 60, 200);
+            state_description = "Unsafe detected, motion stopped";
+            next_action = scene_is_safe ? "PRESS CONTROL TO RESUME"
+                                        : "CLEAR WORKSPACE";
+        } else if (demo_state_text == "SAFE_READY") {
+            state_label = "READY";
+            state_color = cv::Scalar(50, 180, 230);
+            state_description = "Recovery path available";
+            next_action = "PRESS CONTROL TO RESUME";
+        }
 
-        cv::putText(display_frame,
-                    std::string("VISION: ") +
-                        safetyStateToString(current_vision_state),
-                    cv::Point(16, 30),
-                    cv::FONT_HERSHEY_SIMPLEX,
-                    0.7,
-                    cv::Scalar(255, 255, 255),
-                    2);
+        const std::string motion_label = motion_gate_open ? "ALLOWED" : "BLOCKED";
+        const cv::Scalar motion_color =
+            motion_gate_open ? cv::Scalar(60, 170, 80)
+                             : (scene_is_safe ? cv::Scalar(50, 180, 230)
+                                              : cv::Scalar(60, 60, 200));
+        const std::string footer_info =
+            std::to_string(frameWidth(display_frame)) + "x" +
+            std::to_string(frameHeight(display_frame)) + " | marker " +
+            std::to_string(options.expected_marker_id) + " | " +
+            camera_capture.backendName();
 
-        cv::putText(display_frame,
-                    std::string("GUARDIAN: ") + guardian_state_text,
-                    cv::Point(16, 60),
-                    cv::FONT_HERSHEY_SIMPLEX,
-                    0.7,
-                    cv::Scalar(255, 255, 255),
-                    2);
-
-        cv::putText(display_frame,
-                    std::string("INTERLOCK: ") + interlock_state_text,
-                    cv::Point(16, 90),
-                    cv::FONT_HERSHEY_SIMPLEX,
-                    0.7,
-                    cv::Scalar(255, 255, 255),
-                    2);
-
-        cv::putText(display_frame,
-                    std::string("CONTROL: space/button = control") +
-                        " | READY_TO_ARM: " + (scene_is_safe ? "YES" : "NO"),
-                    cv::Point(16, 120),
-                    cv::FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    cv::Scalar(255, 255, 0),
-                    2);
-
-        cv::putText(display_frame,
-                    std::string("POSE: ") + current_pose_name,
-                    cv::Point(16, 150),
-                    cv::FONT_HERSHEY_SIMPLEX,
-                    0.7,
-                    cv::Scalar(255, 255, 255),
-                    2);
-
-        cv::putText(display_frame,
-                    std::string("DEMO: ") + demo_state_text,
-                    cv::Point(16, 180),
-                    cv::FONT_HERSHEY_SIMPLEX,
-                    0.7,
-                    cv::Scalar(255, 255, 255),
-                    2);
-
-        cv::putText(display_frame,
-                    std::string("FREEZE: ") + freeze_reason_text,
-                    cv::Point(16, 210),
-                    cv::FONT_HERSHEY_SIMPLEX,
-                    0.7,
-                    cv::Scalar(255, 255, 255),
-                    2);
-
-        drawLatencyOverlay(display_frame, latency_metrics, 240);
+        drawSupervisoryGui(
+            display_frame,
+            SupervisoryUiModel{
+                "FULL DEMO",
+                state_label,
+                state_description,
+                state_color,
+                motion_label,
+                motion_color,
+                "space/button = control",
+                next_action,
+                freeze_reason_text,
+                footer_info,
+                latency_metrics,
+                {
+                    {"Vision", safetyStateToString(current_vision_state),
+                     severityColor(safetyStateToString(current_vision_state))},
+                    {"Guardian", guardian_state_text,
+                     severityColor(guardian_state_text)},
+                    {"Interlock", interlock_state_text,
+                     severityColor(interlock_state_text)},
+                    {"Pose", current_pose_name, cv::Scalar(25, 25, 25)},
+                    {"Ready", scene_is_safe ? "YES" : "NO",
+                     scene_is_safe ? cv::Scalar(60, 170, 80)
+                                   : cv::Scalar(60, 60, 200)},
+                },
+                false,
+                "",
+                cv::Scalar(25, 25, 25),
+                demo_state_text == "FROZEN"});
 
         cv::imshow(kDemoWindowName, display_frame);
         const int key = cv::waitKey(1);
@@ -2632,94 +2989,84 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
                                               GuardianState::SAFE_MONITORING) &&
                                              interlock->motionAllowed())
                                           : (current_vision_state == SafetyState::SAFE);
-        const cv::Scalar decision_color =
-            decision_is_safe ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 0, 255);
-
-        cv::putText(display_frame,
-                    std::string("VISION: ") +
-                        safetyStateToString(current_vision_state),
-                    cv::Point(16, 30),
-                    cv::FONT_HERSHEY_SIMPLEX,
-                    0.7,
-                    cv::Scalar(255, 255, 255),
-                    2);
-
-        cv::putText(display_frame,
-                    std::string("GUARDIAN: ") + guardian_state_text,
-                    cv::Point(16, 60),
-                    cv::FONT_HERSHEY_SIMPLEX,
-                    0.7,
-                    cv::Scalar(255, 255, 255),
-                    2);
-
-        cv::putText(display_frame,
-                    std::string("INTERLOCK: ") + interlock_state_text,
-                    cv::Point(16, 90),
-                    cv::FONT_HERSHEY_SIMPLEX,
-                    0.7,
-                    cv::Scalar(255, 255, 255),
-                    2);
-
-        cv::putText(display_frame,
-                    std::string("CONTROL: space/button = control") +
-                        " | CAN_ARM: " + (frame_is_safe ? "YES" : "NO"),
-                    cv::Point(16, 120),
-                    cv::FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    cv::Scalar(255, 255, 0),
-                    2);
-
-        cv::putText(display_frame,
-                    "ROUTINE: " +
-                        std::to_string(
-                            getLiveRoutineDefinition(selected_routine_index).number) +
-                        " " + getLiveRoutineDefinition(selected_routine_index).name,
-                    cv::Point(16, 150),
-                    cv::FONT_HERSHEY_SIMPLEX,
-                    0.7,
-                    cv::Scalar(255, 255, 255),
-                    2);
-
-        cv::putText(display_frame,
-                    guardian_armed ? (decision_is_safe ? "SAFE" : "UNSAFE")
-                                   : (frame_is_safe ? "OBSERVED_SAFE"
-                                                    : "OBSERVED_UNSAFE"),
-                    cv::Point(16, 185),
-                    cv::FONT_HERSHEY_DUPLEX,
-                    1.0,
-                    decision_color,
-                    2);
-
-        cv::putText(display_frame,
-                    "Expected marker ID: " + std::to_string(options.expected_marker_id),
-                    cv::Point(16, 215),
-                    cv::FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    cv::Scalar(180, 180, 180),
-                    1);
+        std::string ui_state_label = "SETUP";
+        std::string ui_state_description = "Waiting for safe scene";
+        std::string next_action = "MAKE SCENE SAFE";
+        if (!guardian_armed && frame_is_safe) {
+            ui_state_label = "READY";
+            ui_state_description = "Scene safe and ready to arm";
+            next_action = "PRESS CONTROL TO ARM";
+        } else if (guardian_armed && motion_gate_open && decision_is_safe) {
+            ui_state_label = "RUNNING";
+            ui_state_description = "Guard active and motion allowed";
+            next_action = "PRESS CONTROL TO DISARM";
+        } else if (guardian_armed &&
+                   guardian->getState() == GuardianState::FROZEN_UNSAFE) {
+            ui_state_label = "FROZEN";
+            ui_state_description = "Unsafe detected, motion stopped";
+            next_action = frame_is_safe ? "PRESS CONTROL TO RESUME"
+                                        : "CLEAR WORKSPACE";
+        } else if (guardian_armed &&
+                   guardian->getState() == GuardianState::RESET_PENDING) {
+            ui_state_label = "WAITING";
+            ui_state_description = "Safe again, waiting for recovery";
+            next_action = "WAIT FOR RECOVERY";
+        } else if (guardian_armed && frame_is_safe) {
+            ui_state_label = "READY";
+            ui_state_description = "Guard armed, motion blocked";
+            next_action = "PRESS CONTROL";
+        }
 
         const cv::Scalar focus_color =
-            (focus_score < 60.0) ? cv::Scalar(0, 0, 255)
-                                 : ((focus_score < 180.0) ? cv::Scalar(0, 255, 255)
-                                                           : cv::Scalar(0, 255, 0));
-        cv::putText(display_frame,
-                    "FOCUS_SCORE: " + formatFocusScore(focus_score) + " (" +
-                        std::string(focus_quality) + ")",
-                    cv::Point(16, 245),
-                    cv::FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    focus_color,
-                    2);
+            (focus_score < 60.0) ? cv::Scalar(60, 60, 200)
+                                 : ((focus_score < 180.0) ? cv::Scalar(50, 180, 230)
+                                                           : cv::Scalar(60, 170, 80));
+        const std::string routine_label =
+            std::to_string(
+                getLiveRoutineDefinition(selected_routine_index).number) +
+            " " + getLiveRoutineDefinition(selected_routine_index).name;
+        const std::string footer_info =
+            std::to_string(frameWidth(display_frame)) + "x" +
+            std::to_string(frameHeight(display_frame)) + " | marker " +
+            std::to_string(options.expected_marker_id) + " | " +
+            camera_capture.backendName();
 
-        cv::putText(display_frame,
-                    "Focus hint: adjust lens/ring until score rises and marker is stable",
-                    cv::Point(16, 270),
-                    cv::FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    cv::Scalar(200, 200, 200),
-                    1);
-
-        drawLatencyOverlay(display_frame, latency_metrics, 300);
+        drawSupervisoryGui(
+            display_frame,
+            SupervisoryUiModel{
+                "LIVE TEST",
+                ui_state_label,
+                ui_state_description,
+                guardian_armed && guardian->getState() == GuardianState::FROZEN_UNSAFE
+                    ? cv::Scalar(60, 60, 200)
+                    : (frame_is_safe ? cv::Scalar(60, 170, 80)
+                                     : cv::Scalar(170, 140, 60)),
+                motion_gate_open ? "ALLOWED" : "BLOCKED",
+                motion_gate_open ? cv::Scalar(60, 170, 80)
+                                 : (frame_is_safe ? cv::Scalar(50, 180, 230)
+                                                  : cv::Scalar(60, 60, 200)),
+                "space/button = control",
+                next_action,
+                freeze_reason_text,
+                footer_info,
+                latency_metrics,
+                {
+                    {"Vision", safetyStateToString(current_vision_state),
+                     severityColor(safetyStateToString(current_vision_state))},
+                    {"Guardian", guardian_state_text,
+                     severityColor(guardian_state_text)},
+                    {"Interlock", interlock_state_text,
+                     severityColor(interlock_state_text)},
+                    {"Routine", routine_label, cv::Scalar(25, 25, 25)},
+                    {"Pose", current_pose_name, cv::Scalar(25, 25, 25)},
+                    {"Can arm", frame_is_safe ? "YES" : "NO",
+                     frame_is_safe ? cv::Scalar(60, 170, 80)
+                                   : cv::Scalar(60, 60, 200)},
+                },
+                true,
+                formatFocusScore(focus_score) + " (" + std::string(focus_quality) + ")",
+                focus_color,
+                guardian_armed && guardian->getState() == GuardianState::FROZEN_UNSAFE});
 
         cv::imshow(kLiveWindowName, display_frame);
         const int key = cv::waitKey(1);
