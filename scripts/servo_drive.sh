@@ -55,25 +55,25 @@ print_status() {
 }
 
 set_qwerty_keymap() {
-    KEY_BASE_LEFT="a"
-    KEY_BASE_RIGHT="d"
+    KEY_BASE_LEFT="d"
+    KEY_BASE_RIGHT="a"
     KEY_UPPER_FORWARD="w"
     KEY_UPPER_BACKWARD="s"
     KEY_LOWER_UP="q"
     KEY_LOWER_DOWN="e"
-    KEY_GRIP_OPEN="c"
-    KEY_GRIP_CLOSE="v"
+    KEY_GRIP_OPEN="u"
+    KEY_GRIP_CLOSE="o"
 }
 
 set_azerty_keymap() {
-    KEY_BASE_LEFT="q"
-    KEY_BASE_RIGHT="d"
+    KEY_BASE_LEFT="d"
+    KEY_BASE_RIGHT="q"
     KEY_UPPER_FORWARD="z"
     KEY_UPPER_BACKWARD="s"
     KEY_LOWER_UP="a"
     KEY_LOWER_DOWN="e"
-    KEY_GRIP_OPEN="c"
-    KEY_GRIP_CLOSE="v"
+    KEY_GRIP_OPEN="u"
+    KEY_GRIP_CLOSE="o"
 }
 
 prompt_single_key() {
@@ -151,8 +151,8 @@ configure_keymap() {
 
     if [[ -z "$mode" ]]; then
         echo "[DRIVE] Select keymap preset:"
-        echo "[DRIVE]   1) azerty (q/d z/s a/e)"
-        echo "[DRIVE]   2) qwerty (a/d w/s q/e)"
+        echo "[DRIVE]   1) azerty (d/q z/s a/e u/o)"
+        echo "[DRIVE]   2) qwerty (d/a w/s q/e u/o)"
         echo "[DRIVE]   3) custom"
         read -rp "[DRIVE] choice [1/2/3] (default: 1): " choice
         choice="${choice:-1}"
