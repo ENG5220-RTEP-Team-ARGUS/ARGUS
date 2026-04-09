@@ -101,19 +101,19 @@ The current branch validates that safety workflow on a small real arm using mark
 ### Controller
 | Component | Quantity | Cost (£) |
 |----------|---------|----------|
-| Raspberry Pi (Model TBD) | 1 | TBD |
+| Raspberry Pi 5 | 1 | Not tracked in repo |
 
 ### Sensors & Vision
 | Component | Quantity | Cost (£) |
 |----------|---------|----------|
-| Camera Module | 1 | TBD |
+| Raspberry Pi Camera Module | 1 | Not tracked in repo |
 
 ### Additional Components
 | Component | Quantity | Cost (£) |
 |----------|---------|----------|
-| Robotic Arm (Test Platform) | 1 | TBD |
+| MeArm test platform | 1 | Not tracked in repo |
 
-**Total Cost:** TBD
+**Total Cost:** Not tracked in the repository.
 
 ### Current validated bench hardware
 | Component | Quantity | Notes |
@@ -134,13 +134,14 @@ The current branch validates that safety workflow on a small real arm using mark
 - Linux (Raspberry Pi OS)
 - C++17+
 - CMake ≥ 3.10
-- OpenCV (if used)
-- libgpiod
+- OpenCV
+- pkg-config
+- libcamera runtime tools on the Pi
 
 ### Install Dependencies
 ```bash
 sudo apt update
-sudo apt install cmake libgpiod-dev
+sudo apt install -y build-essential cmake pkg-config libopencv-dev libcamera-tools
 ```
 
 ### Current validated Raspberry Pi packages
@@ -149,10 +150,31 @@ sudo apt update
 sudo apt install -y build-essential cmake pkg-config libopencv-dev libcamera-tools
 ```
 
+### Bundled Bernd compliance backend packages
+To build the bundled `libcamera2opencv` backend in this repo:
+```bash
+sudo apt install -y libcamera-dev libturbojpeg0-dev
+```
+
+Then configure and build ARGUS. The vendored backend will be compiled
+automatically when the dependencies are present:
+```bash
+cmake -S . -B build
+cmake --build build -j$(nproc)
+```
+
 ### Setup notes for this branch
-- use `libcamerify` for Pi camera modes
+- use the wrapper scripts for Pi camera modes; they try the compliance backend
+  first and use `libcamerify` only for the OpenCV/V4L2 fallback path
 - full demo self-elevates with `sudo` because the physical button uses the GPIO character-device interface
 - the current default expected marker ID is `23`
+- the project vendors Bernd Porr `cppTimer` and `libcamera2opencv` under `third_party/`
+- in auto mode, camera capture now tries the bundled Bernd backend first and
+  falls back to the older OpenCV/V4L2 path only if that fails
+- you can force the Bernd camera backend with:
+  `ARGUS_CAMERA_BACKEND=libcamera2opencv`
+- third-party licensing and attribution are documented in
+  [THIRD_PARTY_NOTICES.md](/home/nathan_sidib/Code/ENG5220-RTEP-ARGUS/ARGUS/THIRD_PARTY_NOTICES.md)
 
 ---
 
@@ -249,14 +271,22 @@ Runs built-in state-machine scenarios without live camera or hardware motion:
 Recommended on Raspberry Pi:
 
 ```bash
-libcamerify ./build/ARGUS --live-test --camera-index 0 --expected-marker-id 23
+./scripts/live_test.sh
 ```
 
 Options:
 - `--camera-index <n>`: camera index, default `0`
 - `--expected-marker-id <n>`: expected ArUco ID, default `23`
+- `--camera-backend <name>`: `auto`, `libcamera2opencv`, or `opencv`
 - `--auto-ack`: auto-send operator acknowledge when frozen
 - `--help`: print usage
+
+Notes:
+- `./scripts/live_test.sh` uses the default camera index `0` and expected
+  marker ID `23`
+- by default the wrapper tries `libcamera2opencv` first and falls back to the
+  older OpenCV/V4L2 path only if that run fails
+- if you want to force a backend explicitly, pass `--camera-backend`
 
 #### 3) Motion smoke test
 Runs a motion-only servo sweep through the existing `AppController -> MotionController` path:
@@ -373,43 +403,46 @@ Runs camera + vision + guardian + interlock + motion through the normal safety p
 or directly:
 
 ```bash
-sudo -E libcamerify ./build/ARGUS --full-demo --camera-index 0 --expected-marker-id 23
+sudo -E ./build/ARGUS --full-demo --camera-index 0 --expected-marker-id 23
 ```
 
 Current full demo dance:
-- `BASE +60`
-- `BASE -60`
+- `BASE +45`
+- `BASE -45`
 - `HOME`
-- `LOWER +60`
-- `LOWER -60`
+- `LOWER +45`
+- `LOWER -45`
 - `HOME`
-- `UPPER +60`
-- `UPPER -60`
+- `UPPER +45`
+- `UPPER -45`
 - `HOME`
-- `GRIP +60`
-- `GRIP -60`
+- `GRIP +45`
+- `GRIP -45`
 - `HOME`
 
 Live-test controls:
-- `a`: arm guardian enforcement when current reading is safe
-- `d`: disarm and return to setup mode
-- `r`: acknowledge a frozen state and let the guardian recover
+- `space`: single-button control
+- `a`, `r`, `d`: legacy aliases for the same control path
+- `1`: select routine 1 (`FULL_SWEEP`)
+- `2`: select routine 2 (`BASE_SCAN`)
+- `3`: select routine 3 (`GRIP_PULSE`)
 - `q`: quit
 
 Full-demo controls:
-- `a`: continue
-- `r`: continue
+- `space`: continue
+- `a`, `r`: legacy aliases
 - `q`: quit
 
 Physical button behavior:
-- in live mode, the button routes through the guardian/interlock acknowledgement path
-- in full demo, the same `ACK_REQUEST` acts as `continue`
-- before arm, `continue` means `arm/start`
-- after a freeze, `continue` means `acknowledge and resume`
+- in live mode and full demo, the physical button is the default single-button operator control
+- if disarmed and safe, press it to arm/start motion
+- if armed and running, press it again to disarm
+- if frozen and safe again, press it to acknowledge and resume
 
 GPIO overrides:
 - `ARGUS_BUTTON_ACK_GPIO` defaults to `24`
-- `ARGUS_BUTTON_ARM_GPIO` and `ARGUS_BUTTON_DISARM_GPIO` are optional extras
+- `ARGUS_BUTTON_ARM_GPIO` and `ARGUS_BUTTON_DISARM_GPIO` remain optional, but
+  the default operator contract uses a single physical continue button
 - `ARGUS_BUTTON_ACTIVE_LOW` defaults to `1`
 - `ARGUS_BUTTON_DEBOUNCE_MS` defaults to `50`
 
@@ -513,16 +546,91 @@ build/               # out-of-tree build directory used by the validated flow
 
 ## Real-Time Design & Latency
 
-- Event-driven architecture (no polling)
-- Deterministic response times
-- Frame-based processing pipeline
+- Frame-based safety pipeline
+- Timer-driven control pacing via vendored `cppTimer`
+- Safety decisions and control transitions should be measured using
+  `std::chrono::steady_clock`
 
-> ⚠️ *Add measured latency results here*
+### Latency metrics that matter
+
+The main latency question in ARGUS is not just "how long does vision take?".
+It is "how long does it take to go from seeing an unsafe condition to sending
+the stop command?".
+
+Recommended software-side metrics:
+
+- `vision_us`
+  - Time spent inside `VisionProcessor::process()`.
+  - This is the pure vision-processing cost per frame.
+
+- `unsafe_detect_ms`
+  - Time from frame capture to the point where the system decides that frame is
+    unsafe.
+  - This is the first detection latency.
+
+- `freeze_pipeline_ms`
+  - Time from "unsafe decision made" to the guardian/interlock freeze callback
+    being triggered.
+  - This shows how much delay the software control path adds after vision has
+    already decided the scene is unsafe.
+
+- `freeze_cmd_ms`
+  - Time from entering the freeze callback to the motion stop command being sent
+    through `RobotInterlock` / `MotionController`.
+  - This is the software actuation latency.
+
+- `total_stop_ms`
+  - Time from capture of the first unsafe frame to the motion stop command being
+    issued.
+  - This is the main end-to-end software safety latency.
+
+Recovery-side metrics also matter:
+
+- `safe_again_ms`
+  - Time from the first good frame after freeze to the point where the system is
+    ready to recover.
+
+- `ack_to_resume_ms`
+  - Time from operator continue / acknowledge input to motion re-enable.
+
+- `total_recovery_ms`
+  - Time from first safe-again frame to motion re-enable.
+
+### Important limitation
+
+ARGUS can measure software-command latency, but not true physical stop latency.
+
+That means the current code can measure:
+- when the unsafe condition was detected
+- when freeze was commanded
+- when motion output was disabled or re-enabled in software
+
+It cannot directly measure:
+- the exact moment the servo horn physically stopped moving
+- the exact moment mechanical motion resumed
+
+Those physical timings would need extra sensing, for example:
+- encoder feedback
+- a logic analyser on output lines
+- an external high-speed camera
+- another motion sensor
+
+So in this project the latency numbers should be described as software or
+command latency unless external measurement hardware is added.
 
 ### Current runtime notes
 - live test freezes after `30` consecutive bad frames and recovers after `3` good frames
 - full demo freezes after `1` bad frame and recovers after `3` good frames
 - live test shows focus score and safety overlays to support setup and debugging
+- live test and full demo now show these software-side latency values directly in the GUI:
+  - `vision_us`
+  - `unsafe_detect_ms`
+  - `freeze_pipeline_ms`
+  - `freeze_cmd_ms`
+  - `total_stop_ms`
+  - `ack_to_resume_ms`
+- `safe_again_ms` and `total_recovery_ms` are still part of the design discussion,
+  but are not yet surfaced in the runtime overlay
 
 ---
 
@@ -578,7 +686,18 @@ v4l2-ctl --list-formats-ext -d /dev/video0
 
 ## License
 
-*Specify license here.*
+This repository is mixed-license:
+
+- original ARGUS code outside `third_party/` is licensed under the MIT License
+- vendored Bernd Porr components under `third_party/` keep their original GPL
+  licenses
+- attribution and file-level licensing details are listed in
+  [THIRD_PARTY_NOTICES.md](/home/nathan_sidib/Code/ENG5220-RTEP-ARGUS/ARGUS/THIRD_PARTY_NOTICES.md)
+- if you redistribute a build of `ARGUS` that includes the vendored GPL
+  components, you must comply with those GPL terms
+
+See [LICENSE](/home/nathan_sidib/Code/ENG5220-RTEP-ARGUS/ARGUS/LICENSE) for the
+repository-level licensing note.
 
 ---
 

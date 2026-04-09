@@ -1,6 +1,7 @@
 #include "AppController.hpp"
 
 #include "CameraCapture.hpp"
+#include "CppTimerStdFuncCallback.h"
 #include "GuardianStateMachine.hpp"
 #include "PhysicalButtonModule.hpp"
 #include "RobotInterlock.hpp"
@@ -8,16 +9,19 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cctype>
 #include <chrono>
 #include <csignal>
 #include <cmath>
+#include <condition_variable>
 #include <cstdint>
 #include <exception>
 #include <iomanip>
 #include <iostream>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -57,18 +61,19 @@ constexpr std::chrono::milliseconds kMotionHomeSettleDwell{2000};
 constexpr int kDemoFreezeBadFrameThreshold = 1;
 constexpr int kDemoRecoverGoodFrameThreshold = 3;
 constexpr std::chrono::milliseconds kDemoStepDwell{1000};
-constexpr int kDemoBaseMinOffset = -60;
-constexpr int kDemoBaseMaxOffset = 60;
-constexpr int kDemoLowerMinOffset = -60;
-constexpr int kDemoLowerMaxOffset = 60;
-constexpr int kDemoUpperMinOffset = -60;
-constexpr int kDemoUpperMaxOffset = 60;
-constexpr int kDemoGripMinOffset = -60;
-constexpr int kDemoGripMaxOffset = 60;
-constexpr int kDemoBaseStep = 60;
-constexpr int kDemoLowerStep = 60;
-constexpr int kDemoUpperStep = 60;
-constexpr int kDemoGripStep = 60;
+constexpr int kDemoBaseMinOffset = -45;
+constexpr int kDemoBaseMaxOffset = 45;
+constexpr int kDemoLowerMinOffset = -45;
+constexpr int kDemoLowerMaxOffset = 45;
+constexpr int kDemoUpperMinOffset = -45;
+constexpr int kDemoUpperMaxOffset = 45;
+constexpr int kDemoGripMinOffset = -45;
+constexpr int kDemoGripMaxOffset = 45;
+constexpr int kDemoBaseStep = 45;
+constexpr int kDemoLowerStep = 45;
+constexpr int kDemoUpperStep = 45;
+constexpr int kDemoGripStep = 45;
+constexpr std::chrono::milliseconds kCaptureRetryBackoff{50};
 
 class MotionControllerHardwareAdapter final : public RobotHardware {
 public:
@@ -100,6 +105,41 @@ private:
 
 void handleInteractiveServoSignal(int) {
     g_interactive_servo_stop_requested = 1;
+}
+
+bool waitForCppTimerDelay(std::chrono::nanoseconds delay,
+                          std::string& error_message) {
+    if (delay.count() <= 0) {
+        error_message.clear();
+        return true;
+    }
+
+    std::mutex mutex;
+    std::condition_variable condition;
+    bool fired = false;
+
+    CppTimerCallback timer;
+    timer.registerEventCallback([&]() {
+        std::lock_guard<std::mutex> lock(mutex);
+        fired = true;
+        condition.notify_one();
+    });
+
+    try {
+        timer.startns(static_cast<long>(delay.count()), ONESHOT);
+    } catch (const char* exception) {
+        error_message = exception;
+        return false;
+    } catch (...) {
+        error_message = "CppTimer start failed";
+        return false;
+    }
+
+    std::unique_lock<std::mutex> lock(mutex);
+    condition.wait(lock, [&]() { return fired; });
+    timer.stop();
+    error_message.clear();
+    return true;
 }
 
 double computeFocusScore(const cv::Mat& image) {
@@ -136,6 +176,67 @@ std::string formatFocusScore(double focus_score) {
     std::ostringstream oss;
     oss << std::fixed << std::setprecision(1) << focus_score;
     return oss.str();
+}
+
+struct RuntimeLatencyMetrics {
+    long long vision_us = 0;
+    std::optional<long long> unsafe_detect_ms;
+    std::optional<long long> freeze_pipeline_ms;
+    std::optional<long long> freeze_cmd_ms;
+    std::optional<long long> total_stop_ms;
+    std::optional<long long> ack_to_resume_ms;
+};
+
+long long elapsedMilliseconds(std::chrono::steady_clock::time_point from,
+                              std::chrono::steady_clock::time_point to) {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(to - from)
+        .count();
+}
+
+std::string formatLatencyMilliseconds(const std::optional<long long>& value) {
+    return value.has_value() ? std::to_string(*value) : "N/A";
+}
+
+void drawLatencyOverlay(cv::Mat& frame,
+                        const RuntimeLatencyMetrics& metrics,
+                        int start_y) {
+    constexpr int kX = 16;
+    constexpr int kSpacing = 24;
+    constexpr double kFontScale = 0.55;
+    const cv::Scalar label_color(200, 200, 200);
+    const cv::Scalar value_color(255, 255, 255);
+
+    cv::putText(frame,
+                "LATENCY: vision_us=" + std::to_string(metrics.vision_us) +
+                    " unsafe_detect_ms=" +
+                    formatLatencyMilliseconds(metrics.unsafe_detect_ms),
+                cv::Point(kX, start_y),
+                cv::FONT_HERSHEY_SIMPLEX,
+                kFontScale,
+                label_color,
+                1);
+
+    cv::putText(frame,
+                "FREEZE: pipeline_ms=" +
+                    formatLatencyMilliseconds(metrics.freeze_pipeline_ms) +
+                    " cmd_ms=" +
+                    formatLatencyMilliseconds(metrics.freeze_cmd_ms) +
+                    " total_stop_ms=" +
+                    formatLatencyMilliseconds(metrics.total_stop_ms),
+                cv::Point(kX, start_y + kSpacing),
+                cv::FONT_HERSHEY_SIMPLEX,
+                kFontScale,
+                value_color,
+                1);
+
+    cv::putText(frame,
+                "RESUME: ack_to_resume_ms=" +
+                    formatLatencyMilliseconds(metrics.ack_to_resume_ms),
+                cv::Point(kX, start_y + 2 * kSpacing),
+                cv::FONT_HERSHEY_SIMPLEX,
+                kFontScale,
+                value_color,
+                1);
 }
 
 const char* safetyStateToString(SafetyState state) {
@@ -188,6 +289,19 @@ const char* freezeReasonToString(FreezeReason reason) {
         default:
             return "UNKNOWN_FAULT";
     }
+}
+
+const char* cameraBackendPreferenceToString(
+    CameraCapture::BackendPreference preference) {
+    switch (preference) {
+        case CameraCapture::BackendPreference::Auto:
+            return "auto";
+        case CameraCapture::BackendPreference::OpenCvVideoCapture:
+            return "opencv";
+        case CameraCapture::BackendPreference::Libcamera2OpenCv:
+            return "libcamera2opencv";
+    }
+    return "unknown";
 }
 
 const char* interlockStateToString(InterlockState state) {
@@ -276,22 +390,79 @@ struct DemoPoseStep {
     SmokeJointOffsets offsets;
 };
 
+struct LiveRoutineDefinition {
+    int number;
+    const char* name;
+    const DemoPoseStep* steps;
+    std::size_t step_count;
+};
+
 constexpr DemoPoseStep kDemoHomeStep{"HOME", kSmokeHomePose};
 
 constexpr std::array<DemoPoseStep, 12> kDemoSequence = {{
-    {"BASE +60", {kDemoBaseStep, 0, 0, 0}},
-    {"BASE -60", {-kDemoBaseStep, 0, 0, 0}},
+    {"BASE +45", {kDemoBaseStep, 0, 0, 0}},
+    {"BASE -45", {-kDemoBaseStep, 0, 0, 0}},
     {"HOME", {0, 0, 0, 0}},
-    {"LOWER +60", {0, kDemoLowerStep, 0, 0}},
-    {"LOWER -60", {0, -kDemoLowerStep, 0, 0}},
+    {"LOWER +45", {0, kDemoLowerStep, 0, 0}},
+    {"LOWER -45", {0, -kDemoLowerStep, 0, 0}},
     {"HOME", {0, 0, 0, 0}},
-    {"UPPER +60", {0, 0, kDemoUpperStep, 0}},
-    {"UPPER -60", {0, 0, -kDemoUpperStep, 0}},
+    {"UPPER +45", {0, 0, kDemoUpperStep, 0}},
+    {"UPPER -45", {0, 0, -kDemoUpperStep, 0}},
     {"HOME", {0, 0, 0, 0}},
-    {"GRIP +60", {0, 0, 0, kDemoGripStep}},
-    {"GRIP -60", {0, 0, 0, -kDemoGripStep}},
+    {"GRIP +45", {0, 0, 0, kDemoGripStep}},
+    {"GRIP -45", {0, 0, 0, -kDemoGripStep}},
     {"HOME", {0, 0, 0, 0}},
 }};
+
+constexpr std::array<DemoPoseStep, 5> kLiveBaseScanSequence = {{
+    {"HOME", {0, 0, 0, 0}},
+    {"BASE +45", {kDemoBaseStep, 0, 0, 0}},
+    {"HOME", {0, 0, 0, 0}},
+    {"BASE -45", {-kDemoBaseStep, 0, 0, 0}},
+    {"HOME", {0, 0, 0, 0}},
+}};
+
+constexpr std::array<DemoPoseStep, 5> kLiveGripPulseSequence = {{
+    {"HOME", {0, 0, 0, 0}},
+    {"GRIP +45", {0, 0, 0, kDemoGripStep}},
+    {"HOME", {0, 0, 0, 0}},
+    {"GRIP -45", {0, 0, 0, -kDemoGripStep}},
+    {"HOME", {0, 0, 0, 0}},
+}};
+
+LiveRoutineDefinition getLiveRoutineDefinition(std::size_t index) {
+    switch (index) {
+        case 1:
+            return {2,
+                    "BASE_SCAN",
+                    kLiveBaseScanSequence.data(),
+                    kLiveBaseScanSequence.size()};
+        case 2:
+            return {3,
+                    "GRIP_PULSE",
+                    kLiveGripPulseSequence.data(),
+                    kLiveGripPulseSequence.size()};
+        case 0:
+        default:
+            return {1, "FULL_SWEEP", kDemoSequence.data(), kDemoSequence.size()};
+    }
+}
+
+bool liveRoutineIndexFromKey(int key, std::size_t& index) {
+    switch (key) {
+        case '1':
+            index = 0;
+            return true;
+        case '2':
+            index = 1;
+            return true;
+        case '3':
+            index = 2;
+            return true;
+        default:
+            return false;
+    }
+}
 
 std::string toLowerCopy(std::string text);
 
@@ -1162,7 +1333,11 @@ int AppController::runMotionHomePose() {
         std::cout << " [clamped]";
     }
     std::cout << std::endl;
-    std::this_thread::sleep_for(kMotionHomeSettleDwell);
+
+    std::string timer_error;
+    if (!waitForCppTimerDelay(kMotionHomeSettleDwell, timer_error)) {
+        return fail(std::string("home dwell timer failed: ") + timer_error);
+    }
 
     motion_controller_.shutdown();
     std::cout << "[HOME] done" << std::endl;
@@ -1234,7 +1409,11 @@ int AppController::runMotionSmokeTest(const MotionSmokeTestOptions& options) {
         }
         std::cout << std::endl;
         std::cout << "[SMOKE] wait 3s" << std::endl;
-        std::this_thread::sleep_for(kSmokeStepDwell);
+
+        std::string timer_error;
+        if (!waitForCppTimerDelay(kSmokeStepDwell, timer_error)) {
+            return fail(std::string("smoke dwell timer failed: ") + timer_error);
+        }
         return 0;
     };
 
@@ -1254,7 +1433,13 @@ int AppController::runMotionSmokeTest(const MotionSmokeTestOptions& options) {
 
     std::cout << "[SMOKE] all -> 0" << std::endl;
     std::cout << "[SMOKE] wait 3s" << std::endl;
-    std::this_thread::sleep_for(kSmokeStepDwell);
+    {
+        std::string timer_error;
+        if (!waitForCppTimerDelay(kSmokeStepDwell, timer_error)) {
+            return fail(std::string("initial smoke dwell timer failed: ") +
+                        timer_error);
+        }
+    }
 
     const SmokeJointRunPlan plan = makeSmokeJointRunPlan(options.joint);
     if (plan.count == 0) {
@@ -1308,12 +1493,14 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
         << "[DEMO] full pipeline hardware demo\n"
         << "[DEMO] camera=" << options.camera_index
         << " marker=" << options.expected_marker_id << "\n"
+        << "[DEMO] camera_backend="
+        << cameraBackendPreferenceToString(options.backend_preference) << "\n"
         << "[DEMO] map base=0 lower=4 upper=8 grip=12\n"
-        << "[DEMO] sequence HOME -> BASE +/-60 -> LOWER +/-60 -> UPPER +/-60 -> GRIP +/-60\n"
+        << "[DEMO] sequence HOME -> BASE +/-45 -> LOWER +/-45 -> UPPER +/-45 -> GRIP +/-45\n"
         << "[DEMO] freeze after 1 bad frame, recover after 3 good frames\n"
         << "[DEMO] safe scene required before arm/start\n"
         << "[DEMO] physical button = continue (arm/start or resume)\n"
-        << "[DEMO] controls: a=continue, r=continue, q=quit\n";
+        << "[DEMO] controls: space=continue, a/r=aliases, q=quit\n";
 
     if (!motion_controller_.initialise(kDefaultI2cDevicePath,
                                        kDefaultPca9685Address,
@@ -1328,7 +1515,11 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
     VisionConfig vision_config;
     vision_config.expectedMarkerId = options.expected_marker_id;
     VisionProcessor vision_processor(vision_config);
-    CameraCapture camera_capture(options.camera_index);
+    CameraCapture camera_capture(
+        CameraCapture::Options{options.camera_index, options.backend_preference});
+    std::cout << "[DEMO] camera_backend_active="
+              << camera_capture.backendImplementation() << " ("
+              << camera_capture.backendName() << ")" << std::endl;
     PhysicalButtonModule button_module;
     std::cout << "[DEMO] physical button module: "
               << (button_module.available() ? "configured" : "disabled");
@@ -1363,8 +1554,15 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
     bool home_pose_staged = false;
     std::string current_pose_name = "NONE";
     std::size_t next_step_index = 0;
-    std::chrono::steady_clock::time_point next_step_due =
-        std::chrono::steady_clock::now();
+    CppTimerCallback demo_step_timer;
+    std::atomic<bool> demo_step_due{false};
+    bool demo_step_timer_started = false;
+    RuntimeLatencyMetrics latency_metrics;
+    std::optional<std::chrono::steady_clock::time_point>
+        pending_unsafe_capture_timestamp;
+    std::optional<std::chrono::steady_clock::time_point>
+        pending_unsafe_decision_timestamp;
+    std::optional<std::chrono::steady_clock::time_point> ack_request_timestamp;
 
     auto fail = [&](const std::string& message) {
         std::cerr << "[DEMO] " << message << std::endl;
@@ -1388,6 +1586,36 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
             std::cout << " [clamped]";
         }
         std::cout << " wait=1s" << std::endl;
+        return true;
+    };
+
+    auto stopDemoStepTimer = [&]() {
+        if (demo_step_timer_started) {
+            demo_step_timer.stop();
+            demo_step_timer_started = false;
+        }
+        demo_step_due.store(false, std::memory_order_relaxed);
+    };
+
+    auto startDemoStepTimer = [&]() -> bool {
+        if (demo_step_timer_started) {
+            return true;
+        }
+
+        demo_step_due.store(false, std::memory_order_relaxed);
+        demo_step_timer.registerEventCallback(
+            [&]() { demo_step_due.store(true, std::memory_order_relaxed); });
+
+        try {
+            demo_step_timer.startms(static_cast<long>(kDemoStepDwell.count()), PERIODIC);
+        } catch (const char* exception) {
+            (void)fail(std::string("demo step timer failed: ") + exception);
+            return false;
+        } catch (...) {
+            (void)fail("demo step timer failed");
+            return false;
+        }
+        demo_step_timer_started = true;
         return true;
     };
 
@@ -1424,12 +1652,18 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
             return false;
         }
 
+        if (!startDemoStepTimer()) {
+            return false;
+        }
+
         demo_armed = true;
         motion_gate_open = true;
         waiting_for_ack = false;
         waiting_for_ack_announced = false;
+        ack_request_timestamp.reset();
+        pending_unsafe_capture_timestamp.reset();
+        pending_unsafe_decision_timestamp.reset();
         next_step_index = 0;
-        next_step_due = std::chrono::steady_clock::now() + kDemoStepDwell;
         std::cout << "[DEMO] ARM accepted -> running" << std::endl;
         return true;
     };
@@ -1454,6 +1688,7 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
         interlock.operatorAcknowledge();
         waiting_for_ack = false;
         waiting_for_ack_announced = false;
+        ack_request_timestamp = std::chrono::steady_clock::now();
         std::cout << "[DEMO] ACK accepted -> recovery" << std::endl;
         return interlock.state() != InterlockState::FAULT;
     };
@@ -1478,6 +1713,13 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
     };
 
     guardian.setOnFreezeCallback([&]() {
+        const auto freeze_callback_start = std::chrono::steady_clock::now();
+        if (pending_unsafe_decision_timestamp.has_value()) {
+            latency_metrics.freeze_pipeline_ms = elapsedMilliseconds(
+                *pending_unsafe_decision_timestamp,
+                freeze_callback_start);
+        }
+
         motion_gate_open = false;
         waiting_for_ack = false;
         waiting_for_ack_announced = false;
@@ -1486,6 +1728,17 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
                   << freezeReasonToString(pending_reason) << std::endl;
 
         interlock.onControlEvent(ControlEvent::FREEZE_NOW, pending_reason);
+        const auto freeze_callback_end = std::chrono::steady_clock::now();
+        latency_metrics.freeze_cmd_ms = elapsedMilliseconds(
+            freeze_callback_start,
+            freeze_callback_end);
+        if (pending_unsafe_capture_timestamp.has_value()) {
+            latency_metrics.total_stop_ms = elapsedMilliseconds(
+                *pending_unsafe_capture_timestamp,
+                freeze_callback_end);
+        }
+        pending_unsafe_capture_timestamp.reset();
+        pending_unsafe_decision_timestamp.reset();
         if (interlock.state() == InterlockState::FAULT) {
             motion_faulted = true;
         }
@@ -1493,13 +1746,19 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
 
     guardian.setOnClearFreezeCallback([&]() {
         interlock.onControlEvent(ControlEvent::ALLOW_MOTION);
+        const auto resume_callback_end = std::chrono::steady_clock::now();
+        if (ack_request_timestamp.has_value()) {
+            latency_metrics.ack_to_resume_ms = elapsedMilliseconds(
+                *ack_request_timestamp,
+                resume_callback_end);
+        }
+        ack_request_timestamp.reset();
         if (interlock.state() == InterlockState::FAULT) {
             motion_faulted = true;
             return;
         }
 
         motion_gate_open = true;
-        next_step_due = std::chrono::steady_clock::now() + kDemoStepDwell;
         std::cout << "[DEMO] resume" << std::endl;
     });
 
@@ -1544,7 +1803,7 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
             return true;
         }
 
-        if (std::chrono::steady_clock::now() < next_step_due) {
+        if (!demo_step_due.exchange(false, std::memory_order_relaxed)) {
             return true;
         }
 
@@ -1554,7 +1813,6 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
         }
 
         next_step_index = (next_step_index + 1) % kDemoSequence.size();
-        next_step_due = std::chrono::steady_clock::now() + kDemoStepDwell;
         return true;
     };
 
@@ -1581,16 +1839,23 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
                 break;
             }
 
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            std::string timer_error;
+            if (!waitForCppTimerDelay(kCaptureRetryBackoff, timer_error)) {
+                motion_faulted = true;
+                std::cerr << "[DEMO] retry timer failed: " << timer_error
+                          << std::endl;
+                break;
+            }
             continue;
         }
 
         consecutive_capture_failures = 0;
         processed_any_frame = true;
 
-        const auto now = std::chrono::steady_clock::now();
         const SafetyResult result =
-            vision_processor.process(frame_event.image_data, now);
+            vision_processor.process(frame_event.image_data,
+                                     frame_event.capture_timestamp);
+        latency_metrics.vision_us = result.processing_time.count();
 
         current_vision_state = result.state;
         scene_is_safe = (current_vision_state == SafetyState::SAFE);
@@ -1599,6 +1864,21 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
         }
 
         const GuardianState guardian_state_before_update = guardian.getState();
+        if (demo_armed &&
+            guardian_state_before_update == GuardianState::SAFE_MONITORING) {
+            if (!scene_is_safe) {
+                if (!pending_unsafe_capture_timestamp.has_value()) {
+                    pending_unsafe_capture_timestamp = frame_event.capture_timestamp;
+                    pending_unsafe_decision_timestamp = result.timestamp;
+                    latency_metrics.unsafe_detect_ms = elapsedMilliseconds(
+                        frame_event.capture_timestamp,
+                        result.timestamp);
+                }
+            } else {
+                pending_unsafe_capture_timestamp.reset();
+                pending_unsafe_decision_timestamp.reset();
+            }
+        }
         if (demo_armed &&
             (guardian_state_before_update == GuardianState::SAFE_MONITORING ||
              guardian_state_before_update == GuardianState::RESET_PENDING)) {
@@ -1687,9 +1967,7 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
                     2);
 
         cv::putText(display_frame,
-                    std::string("CONTROL: ") +
-                        (demo_armed ? "ARMED (r/button=ack)"
-                                    : "DISARMED (a/button=arm)") +
+                    std::string("CONTROL: space/button = control") +
                         " | READY_TO_ARM: " + (scene_is_safe ? "YES" : "NO"),
                     cv::Point(16, 120),
                     cv::FONT_HERSHEY_SIMPLEX,
@@ -1721,11 +1999,19 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
                     cv::Scalar(255, 255, 255),
                     2);
 
+        drawLatencyOverlay(display_frame, latency_metrics, 240);
+
         cv::imshow(kDemoWindowName, display_frame);
         const int key = cv::waitKey(1);
         if (key == 'q' || key == 'Q' || key == 27) {
             std::cout << "[DEMO] quit requested" << std::endl;
             break;
+        }
+        if (key == ' ') {
+            if (!requestContinue()) {
+                motion_faulted = true;
+                break;
+            }
         }
         if (key == 'a' || key == 'A') {
             if (!requestContinue()) {
@@ -1742,6 +2028,7 @@ int AppController::runFullPipelineDemo(const LiveTestOptions& options) {
     }
 
     cv::destroyWindow(kDemoWindowName);
+    stopDemoStepTimer();
     motion_controller_.shutdown();
 
     if (!processed_any_frame) {
@@ -1763,15 +2050,19 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         << "[LIVE_TEST] Starting live marker safety test mode\n"
         << "[LIVE_TEST] Camera index: " << options.camera_index << "\n"
         << "[LIVE_TEST] Expected marker ID: " << options.expected_marker_id << "\n"
+        << "[LIVE_TEST] Camera backend preference: "
+        << cameraBackendPreferenceToString(options.backend_preference) << "\n"
         << "[LIVE_TEST] Auto operator ack: "
         << (options.auto_ack ? "ON" : "OFF") << "\n"
-        << "[LIVE_TEST] Controls: a=arm, d=disarm, r=ack, q=quit\n"
+        << "[LIVE_TEST] Physical button = single-button control\n"
+        << "[LIVE_TEST] Controls: space/button=single-button control, a/r/d=aliases, 1/2/3=select routine, q=quit\n"
         << "[LIVE_TEST] Starting in DISARMED setup mode\n"
         << "[LIVE_TEST] Guardian thresholds: freeze after "
         << kLiveFreezeBadFrameThreshold
         << " consecutive bad frames, recover after "
         << kLiveRecoverGoodFrameThreshold
         << " consecutive good frames.\n"
+        << "[LIVE_TEST] Routines: 1=FULL_SWEEP, 2=BASE_SCAN, 3=GRIP_PULSE\n"
         << "[LIVE_TEST] Focus debug enabled: FOCUS_SCORE (Laplacian variance), "
            "higher usually means sharper marker edges.\n";
 
@@ -1794,14 +2085,143 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
     VisionConfig vision_config;
     vision_config.expectedMarkerId = options.expected_marker_id;
     VisionProcessor vision_processor(vision_config);
+    CameraCapture camera_capture(
+        CameraCapture::Options{options.camera_index, options.backend_preference});
+    std::cout << "[LIVE_TEST] Camera backend active: "
+              << camera_capture.backendImplementation() << " ("
+              << camera_capture.backendName() << ")" << std::endl;
 
     std::unique_ptr<GuardianStateMachine> guardian;
     std::unique_ptr<RobotInterlock> interlock;
     bool guardian_armed = false;
     bool motion_faulted = false;
+    bool motion_gate_open = false;
     FreezeReason pending_reason = FreezeReason::UNKNOWN_FAULT;
     SafetyState current_vision_state = SafetyState::SAFE;
     bool frame_is_safe = false;
+    bool waiting_for_ack = false;
+    bool waiting_for_ack_announced = false;
+    bool home_pose_staged = false;
+    std::string current_pose_name = "HOME";
+    std::size_t selected_routine_index = 0;
+    std::size_t next_routine_step_index = 0;
+    std::atomic<bool> live_step_due{false};
+    CppTimerCallback live_step_timer;
+    bool live_step_timer_started = false;
+    RuntimeLatencyMetrics latency_metrics;
+    std::optional<std::chrono::steady_clock::time_point>
+        pending_unsafe_capture_timestamp;
+    std::optional<std::chrono::steady_clock::time_point>
+        pending_unsafe_decision_timestamp;
+    std::optional<std::chrono::steady_clock::time_point> ack_request_timestamp;
+
+    auto stagePose = [&](const DemoPoseStep& step) -> bool {
+        bool clamped = false;
+        const MeArmJointTargets targets = makeDemoTargets(step.offsets, clamped);
+
+        if (!motion_controller_.setTargets(targets)) {
+            motion_faulted = true;
+            std::cerr << "[LIVE_TEST] failed to stage pose " << step.name << ": "
+                      << motion_controller_.lastErrorString() << std::endl;
+            return false;
+        }
+
+        current_pose_name = step.name;
+        std::cout << "[LIVE_TEST] pose=" << step.name;
+        if (clamped) {
+            std::cout << " [clamped]";
+        }
+        std::cout << " wait=1s" << std::endl;
+        return true;
+    };
+
+    auto stopLiveStepTimer = [&]() {
+        if (live_step_timer_started) {
+            live_step_timer.stop();
+            live_step_timer_started = false;
+        }
+        live_step_due.store(false, std::memory_order_relaxed);
+    };
+
+    auto startLiveStepTimer = [&]() -> bool {
+        if (live_step_timer_started) {
+            return true;
+        }
+
+        live_step_due.store(false, std::memory_order_relaxed);
+        live_step_timer.registerEventCallback(
+            [&]() { live_step_due.store(true, std::memory_order_relaxed); });
+        try {
+            live_step_timer.startms(static_cast<long>(kDemoStepDwell.count()), PERIODIC);
+        } catch (const char* exception) {
+            motion_faulted = true;
+            std::cerr << "[LIVE_TEST] routine timer failed: " << exception
+                      << std::endl;
+            return false;
+        } catch (...) {
+            motion_faulted = true;
+            std::cerr << "[LIVE_TEST] routine timer failed" << std::endl;
+            return false;
+        }
+
+        live_step_timer_started = true;
+        return true;
+    };
+
+    auto announceWaitingState = [&]() {
+        const bool should_wait =
+            frame_is_safe && guardian_armed &&
+            guardian->getState() == GuardianState::FROZEN_UNSAFE;
+
+        if (should_wait && !waiting_for_ack_announced) {
+            std::cout << "[LIVE_TEST] waiting for continue" << std::endl;
+            waiting_for_ack_announced = true;
+        }
+
+        waiting_for_ack = should_wait;
+        if (!should_wait) {
+            waiting_for_ack_announced = false;
+        }
+    };
+
+    auto maybeAdvanceRoutine = [&]() -> bool {
+        if (!guardian_armed || !motion_gate_open || waiting_for_ack) {
+            return true;
+        }
+
+        if (!live_step_due.exchange(false, std::memory_order_relaxed)) {
+            return true;
+        }
+
+        const LiveRoutineDefinition routine =
+            getLiveRoutineDefinition(selected_routine_index);
+        const DemoPoseStep& step = routine.steps[next_routine_step_index];
+        if (!stagePose(step)) {
+            return false;
+        }
+
+        next_routine_step_index =
+            (next_routine_step_index + 1) % routine.step_count;
+        return true;
+    };
+
+    auto selectRoutine = [&](std::size_t routine_index) -> bool {
+        const LiveRoutineDefinition routine = getLiveRoutineDefinition(routine_index);
+        selected_routine_index = routine_index;
+        next_routine_step_index = 0;
+        live_step_due.store(false, std::memory_order_relaxed);
+        std::cout << "[LIVE_TEST] routine " << routine.number << " selected: "
+                  << routine.name << std::endl;
+
+        if (guardian_armed && motion_gate_open && frame_is_safe) {
+            if (!stagePose(kDemoHomeStep)) {
+                return false;
+            }
+            home_pose_staged = true;
+        }
+
+        return true;
+    };
 
     auto resetEnforcementState = [&]() {
         pending_reason = FreezeReason::UNKNOWN_FAULT;
@@ -1811,11 +2231,46 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         interlock = std::make_unique<RobotInterlock>(hardware);
 
         guardian->setOnFreezeCallback([&]() {
+            const auto freeze_callback_start = std::chrono::steady_clock::now();
+            if (pending_unsafe_decision_timestamp.has_value()) {
+                latency_metrics.freeze_pipeline_ms = elapsedMilliseconds(
+                    *pending_unsafe_decision_timestamp,
+                    freeze_callback_start);
+            }
+            motion_gate_open = false;
+            waiting_for_ack = false;
+            waiting_for_ack_announced = false;
             interlock->onControlEvent(ControlEvent::FREEZE_NOW, pending_reason);
+            const auto freeze_callback_end = std::chrono::steady_clock::now();
+            latency_metrics.freeze_cmd_ms = elapsedMilliseconds(
+                freeze_callback_start,
+                freeze_callback_end);
+            if (pending_unsafe_capture_timestamp.has_value()) {
+                latency_metrics.total_stop_ms = elapsedMilliseconds(
+                    *pending_unsafe_capture_timestamp,
+                    freeze_callback_end);
+            }
+            pending_unsafe_capture_timestamp.reset();
+            pending_unsafe_decision_timestamp.reset();
+            std::cout << "[LIVE_TEST] freeze: "
+                      << freezeReasonToString(pending_reason) << std::endl;
         });
 
         guardian->setOnClearFreezeCallback([&]() {
             interlock->onControlEvent(ControlEvent::ALLOW_MOTION);
+            const auto resume_callback_end = std::chrono::steady_clock::now();
+            if (ack_request_timestamp.has_value()) {
+                latency_metrics.ack_to_resume_ms = elapsedMilliseconds(
+                    *ack_request_timestamp,
+                    resume_callback_end);
+            }
+            ack_request_timestamp.reset();
+            if (interlock->state() == InterlockState::FAULT) {
+                motion_faulted = true;
+                return;
+            }
+            motion_gate_open = true;
+            std::cout << "[LIVE_TEST] resume" << std::endl;
         });
 
         guardian->setOnStateChangeCallback([&](GuardianState from, GuardianState to) {
@@ -1839,9 +2294,8 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
     }
     std::cout << std::endl;
     if (!button_module.available()) {
-        std::cout << "[LIVE_TEST] Configure ARGUS_BUTTON_ARM_GPIO, "
-                     "ARGUS_BUTTON_DISARM_GPIO, and/or ARGUS_BUTTON_ACK_GPIO to "
-                     "enable physical operator buttons."
+        std::cout << "[LIVE_TEST] Configure ARGUS_BUTTON_ACK_GPIO to enable the "
+                     "physical single-button control."
                   << std::endl;
     }
 
@@ -1876,7 +2330,39 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         }
 
         resetEnforcementState();
+        if (!stagePose(kDemoHomeStep)) {
+            return false;
+        }
+        home_pose_staged = true;
+        next_routine_step_index = 0;
+
+        interlock->onControlEvent(ControlEvent::FREEZE_NOW, FreezeReason::UNKNOWN_FAULT);
+        if (interlock->state() == InterlockState::FAULT) {
+            motion_faulted = true;
+            std::cerr << "[LIVE_TEST] Unable to prepare motion path for arm: "
+                      << motion_controller_.lastErrorString() << std::endl;
+            return false;
+        }
+
+        interlock->operatorAcknowledge();
+        interlock->onControlEvent(ControlEvent::ALLOW_MOTION);
+        if (interlock->state() == InterlockState::FAULT) {
+            motion_faulted = true;
+            std::cerr << "[LIVE_TEST] Unable to enable motion on arm: "
+                      << motion_controller_.lastErrorString() << std::endl;
+            return false;
+        }
+
+        if (!startLiveStepTimer()) {
+            return false;
+        }
         guardian_armed = true;
+        motion_gate_open = true;
+        waiting_for_ack = false;
+        waiting_for_ack_announced = false;
+        ack_request_timestamp.reset();
+        pending_unsafe_capture_timestamp.reset();
+        pending_unsafe_decision_timestamp.reset();
         std::cout << "[LIVE_TEST] ARM accepted: guardian enforcement is now ACTIVE."
                   << std::endl;
         return true;
@@ -1894,6 +2380,15 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         }
 
         guardian_armed = false;
+        motion_gate_open = false;
+        waiting_for_ack = false;
+        waiting_for_ack_announced = false;
+        home_pose_staged = false;
+        ack_request_timestamp.reset();
+        pending_unsafe_capture_timestamp.reset();
+        pending_unsafe_decision_timestamp.reset();
+        next_routine_step_index = 0;
+        current_pose_name = "HOLD";
         resetEnforcementState();
         std::cout << "[LIVE_TEST] DISARM accepted: guardian enforcement is now INACTIVE "
                      "(setup/observation mode)."
@@ -1908,6 +2403,13 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
             return true;
         }
 
+        if (!frame_is_safe) {
+            std::cout << "[LIVE_TEST] ACK request ignored: current observed condition is "
+                         "unsafe (vision="
+                      << safetyStateToString(current_vision_state) << ")." << std::endl;
+            return true;
+        }
+
         if (guardian->getState() != GuardianState::FROZEN_UNSAFE) {
             std::cout << "[LIVE_TEST] ACK request ignored: guardian is not frozen."
                       << std::endl;
@@ -1916,8 +2418,24 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
 
         guardian->operatorAcknowledge();
         interlock->operatorAcknowledge();
+        ack_request_timestamp = std::chrono::steady_clock::now();
         std::cout << "[LIVE_TEST] Operator acknowledge requested." << std::endl;
         return true;
+    };
+
+    auto requestContinue = [&]() -> bool {
+        if (!guardian_armed) {
+            return requestArm();
+        }
+        if (guardian->getState() == GuardianState::FROZEN_UNSAFE) {
+            return requestAcknowledge();
+        }
+        if (guardian->getState() == GuardianState::RESET_PENDING) {
+            std::cout << "[LIVE_TEST] CONTINUE ignored: waiting for recovery"
+                      << std::endl;
+            return true;
+        }
+        return requestDisarm();
     };
 
     auto requestFromButton = [&](PhysicalButtonEvent event) -> bool {
@@ -1925,17 +2443,63 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
                   << std::endl;
         switch (event) {
             case PhysicalButtonEvent::ARM_REQUEST:
-                return requestArm();
+            case PhysicalButtonEvent::ACK_REQUEST:
+                return requestContinue();
             case PhysicalButtonEvent::DISARM_REQUEST:
                 return requestDisarm();
-            case PhysicalButtonEvent::ACK_REQUEST:
-                return requestAcknowledge();
         }
         return true;
     };
 
-    CameraCapture camera_capture(options.camera_index);
     cv::namedWindow(kLiveWindowName, cv::WINDOW_AUTOSIZE);
+
+    struct LiveStatusSnapshot {
+        bool guardian_armed = false;
+        bool scene_safe = false;
+        bool waiting_for_continue = false;
+        int routine_number = 0;
+        std::string vision_state;
+        std::string guardian_state;
+        std::string interlock_state;
+        std::string motion_controller_state;
+        std::string freeze_reason;
+    };
+
+    LiveStatusSnapshot last_live_status;
+    bool live_status_known = false;
+    auto maybeLogLiveStatus = [&](const LiveStatusSnapshot& snapshot) {
+        const bool changed =
+            !live_status_known ||
+            snapshot.guardian_armed != last_live_status.guardian_armed ||
+            snapshot.scene_safe != last_live_status.scene_safe ||
+            snapshot.waiting_for_continue !=
+                last_live_status.waiting_for_continue ||
+            snapshot.routine_number != last_live_status.routine_number ||
+            snapshot.vision_state != last_live_status.vision_state ||
+            snapshot.guardian_state != last_live_status.guardian_state ||
+            snapshot.interlock_state != last_live_status.interlock_state ||
+            snapshot.motion_controller_state !=
+                last_live_status.motion_controller_state ||
+            snapshot.freeze_reason != last_live_status.freeze_reason;
+        if (!changed) {
+            return;
+        }
+
+        std::cout << "[LIVE_TEST] status: armed="
+                  << (snapshot.guardian_armed ? "YES" : "NO")
+                  << " safe=" << (snapshot.scene_safe ? "YES" : "NO")
+                  << " waiting="
+                  << (snapshot.waiting_for_continue ? "YES" : "NO")
+                  << " routine=" << snapshot.routine_number
+                  << " vision=" << snapshot.vision_state
+                  << " guardian=" << snapshot.guardian_state
+                  << " interlock=" << snapshot.interlock_state
+                  << " motion_ctrl=" << snapshot.motion_controller_state
+                  << " freeze_reason=" << snapshot.freeze_reason << std::endl;
+
+        last_live_status = snapshot;
+        live_status_known = true;
+    };
 
     FrameEvent frame_event;
     std::uint64_t frame_index = 0;
@@ -1960,7 +2524,13 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
                 break;
             }
 
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            std::string timer_error;
+            if (!waitForCppTimerDelay(kCaptureRetryBackoff, timer_error)) {
+                motion_faulted = true;
+                std::cerr << "[LIVE_TEST] retry timer failed: " << timer_error
+                          << std::endl;
+                break;
+            }
             continue;
         }
 
@@ -1969,7 +2539,8 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
 
         const SafetyResult result =
             vision_processor.process(frame_event.image_data,
-                                     std::chrono::steady_clock::now());
+                                     frame_event.capture_timestamp);
+        latency_metrics.vision_us = result.processing_time.count();
         const double focus_score = computeFocusScore(frame_event.image_data);
         const char* focus_quality = focusQualityLabel(focus_score);
 
@@ -1983,10 +2554,27 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         std::string interlock_state_text = "DISARMED";
         std::string freeze_reason_text = "N/A";
 
+        const GuardianState guardian_state_before_update = guardian->getState();
+        if (guardian_armed &&
+            guardian_state_before_update == GuardianState::SAFE_MONITORING) {
+            if (!frame_is_safe) {
+                if (!pending_unsafe_capture_timestamp.has_value()) {
+                    pending_unsafe_capture_timestamp = frame_event.capture_timestamp;
+                    pending_unsafe_decision_timestamp = result.timestamp;
+                    latency_metrics.unsafe_detect_ms = elapsedMilliseconds(
+                        frame_event.capture_timestamp,
+                        result.timestamp);
+                }
+            } else {
+                pending_unsafe_capture_timestamp.reset();
+                pending_unsafe_decision_timestamp.reset();
+            }
+        }
         if (guardian_armed) {
             guardian->processFrame(frame_is_safe ? FrameStatus::FRAME_GOOD
                                                  : FrameStatus::FRAME_BAD);
         }
+        announceWaitingState();
 
         PhysicalButtonEvent button_event;
         while (button_module.poll(button_event)) {
@@ -2001,10 +2589,15 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
 
         if (guardian_armed && options.auto_ack &&
             guardian->getState() == GuardianState::FROZEN_UNSAFE) {
+            ack_request_timestamp = std::chrono::steady_clock::now();
             guardian->operatorAcknowledge();
             interlock->operatorAcknowledge();
             std::cout << "[LIVE_TEST] Operator acknowledge sent automatically"
                       << std::endl;
+        }
+
+        if (!maybeAdvanceRoutine()) {
+            break;
         }
 
         if (guardian_armed) {
@@ -2014,19 +2607,16 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
             freeze_reason_text = freezeReasonToString(interlock->freezeReason());
         }
 
-        std::cout << "[LIVE_TEST] frame=" << frame_index
-                  << " armed=" << (guardian_armed ? "YES" : "NO")
-                  << " can_arm=" << (frame_is_safe ? "YES" : "NO")
-                  << " vision=" << safetyStateToString(current_vision_state)
-                  << " focus_score=" << formatFocusScore(focus_score)
-                  << " focus=" << focus_quality
-                  << " guardian=" << guardian_state_text
-                  << " interlock=" << interlock_state_text
-                  << " motion_ctrl="
-                  << motionControllerStateToString(motion_controller_.outputState())
-                  << " freeze_reason=" << freeze_reason_text
-                  << " processing_us=" << result.processing_time.count()
-                  << std::endl;
+        maybeLogLiveStatus(LiveStatusSnapshot{
+            guardian_armed,
+            frame_is_safe,
+            waiting_for_ack,
+            getLiveRoutineDefinition(selected_routine_index).number,
+            safetyStateToString(current_vision_state),
+            guardian_state_text,
+            interlock_state_text,
+            motionControllerStateToString(motion_controller_.outputState()),
+            freeze_reason_text});
 
         if (interlock->state() == InterlockState::FAULT) {
             motion_faulted = true;
@@ -2071,9 +2661,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
                     2);
 
         cv::putText(display_frame,
-                    std::string("CONTROL: ") +
-                        (guardian_armed ? "ARMED (d=disarm, r=ack)"
-                                        : "DISARMED (a=arm, r=ack)") +
+                    std::string("CONTROL: space/button = control") +
                         " | CAN_ARM: " + (frame_is_safe ? "YES" : "NO"),
                     cv::Point(16, 120),
                     cv::FONT_HERSHEY_SIMPLEX,
@@ -2082,10 +2670,21 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
                     2);
 
         cv::putText(display_frame,
+                    "ROUTINE: " +
+                        std::to_string(
+                            getLiveRoutineDefinition(selected_routine_index).number) +
+                        " " + getLiveRoutineDefinition(selected_routine_index).name,
+                    cv::Point(16, 150),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    cv::Scalar(255, 255, 255),
+                    2);
+
+        cv::putText(display_frame,
                     guardian_armed ? (decision_is_safe ? "SAFE" : "UNSAFE")
                                    : (frame_is_safe ? "OBSERVED_SAFE"
                                                     : "OBSERVED_UNSAFE"),
-                    cv::Point(16, 155),
+                    cv::Point(16, 185),
                     cv::FONT_HERSHEY_DUPLEX,
                     1.0,
                     decision_color,
@@ -2093,7 +2692,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
 
         cv::putText(display_frame,
                     "Expected marker ID: " + std::to_string(options.expected_marker_id),
-                    cv::Point(16, 185),
+                    cv::Point(16, 215),
                     cv::FONT_HERSHEY_SIMPLEX,
                     0.6,
                     cv::Scalar(180, 180, 180),
@@ -2106,7 +2705,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         cv::putText(display_frame,
                     "FOCUS_SCORE: " + formatFocusScore(focus_score) + " (" +
                         std::string(focus_quality) + ")",
-                    cv::Point(16, 215),
+                    cv::Point(16, 245),
                     cv::FONT_HERSHEY_SIMPLEX,
                     0.6,
                     focus_color,
@@ -2114,11 +2713,13 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
 
         cv::putText(display_frame,
                     "Focus hint: adjust lens/ring until score rises and marker is stable",
-                    cv::Point(16, 240),
+                    cv::Point(16, 270),
                     cv::FONT_HERSHEY_SIMPLEX,
                     0.5,
                     cv::Scalar(200, 200, 200),
                     1);
+
+        drawLatencyOverlay(display_frame, latency_metrics, 300);
 
         cv::imshow(kLiveWindowName, display_frame);
         const int key = cv::waitKey(1);
@@ -2127,14 +2728,20 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
             break;
         }
 
+        if (key == ' ') {
+            if (!requestContinue()) {
+                break;
+            }
+        }
+
         if (key == 'r' || key == 'R') {
-            if (!requestAcknowledge()) {
+            if (!requestContinue()) {
                 break;
             }
         }
 
         if (key == 'a' || key == 'A') {
-            if (!requestArm()) {
+            if (!requestContinue()) {
                 break;
             }
         }
@@ -2145,10 +2752,18 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
             }
         }
 
+        std::size_t requested_routine_index = 0;
+        if (liveRoutineIndexFromKey(key, requested_routine_index)) {
+            if (!selectRoutine(requested_routine_index)) {
+                break;
+            }
+        }
+
         ++frame_index;
     }
 
     cv::destroyWindow(kLiveWindowName);
+    stopLiveStepTimer();
     motion_controller_.shutdown();
 
     if (!processed_any_frame) {

@@ -29,21 +29,21 @@ done
 if [[ -n "$requested_backend" ]]; then
     if [[ "$requested_backend" == "opencv" || "$requested_backend" == "videocapture" ]]; then
         if command -v libcamerify >/dev/null 2>&1; then
-            exec libcamerify ./build/ARGUS --full-demo "${args[@]}"
+            exec libcamerify ./build/ARGUS --live-test "${args[@]}"
         fi
     fi
 
-    exec ./build/ARGUS --full-demo "${args[@]}"
+    exec ./build/ARGUS --live-test "${args[@]}"
 fi
 
-echo "[DEMO] trying compliance camera backend first"
-if ./build/ARGUS --full-demo --camera-backend libcamera2opencv "${args[@]}"; then
+echo "[LIVE_TEST] trying compliance camera backend first"
+if ./build/ARGUS --live-test --camera-backend libcamera2opencv "${args[@]}"; then
     exit 0
 fi
 
-echo "[DEMO] compliance camera backend failed; falling back to opencv"
+echo "[LIVE_TEST] compliance camera backend failed; falling back to opencv"
 if command -v libcamerify >/dev/null 2>&1; then
-    exec libcamerify ./build/ARGUS --full-demo --camera-backend opencv "${args[@]}"
+    exec libcamerify ./build/ARGUS --live-test --camera-backend opencv "${args[@]}"
 fi
 
-exec ./build/ARGUS --full-demo --camera-backend opencv "${args[@]}"
+exec ./build/ARGUS --live-test --camera-backend opencv "${args[@]}"

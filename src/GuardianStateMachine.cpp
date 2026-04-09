@@ -191,18 +191,12 @@ void GuardianStateMachine::processEvent(GuardianEvent event) {
                 // If the threshold freezeCount is reached to max, freeze immediately
                 if (badCount >= freezeCount) {
                     transitionTo(GuardianState::FROZEN_UNSAFE, GuardianAction::FREEZE_NOW);
-                } else {
-                    // Otherwise, log how close we are to freezing
-                    std::cout << "[SAFE_MONITORING] Frame Failed, bad_count=" << badCount << "/" << freezeCount << std::endl;
                 }
 
             // Assume a good frame is detected
             } else if (event == GuardianEvent::FRAME_GOOD) {
                 // Reset badCount because we require consecutive bad frames
                 badCount = 0;
-
-                // Log reset
-                std::cout << "[SAFE_MONITORING] Frame Passed, bad_count reset" << std::endl;
             }
             break;
 
@@ -215,11 +209,6 @@ void GuardianStateMachine::processEvent(GuardianEvent event) {
 
                 // Move to RESET_PENDING (still frozen: no motion action yet)
                 transitionTo(GuardianState::RESET_PENDING, GuardianAction::NONE);
-
-            } else if (event == GuardianEvent::FRAME_BAD || event == GuardianEvent::FRAME_GOOD) {
-                // This is to intentionally stay frozen for safety even if frames passed
-                // To prevent automatic restart after a dangerous anomaly
-                std::cout << "[FROZEN_UNSAFE] Remaining frozen, awaiting operator acknowledgment" << std::endl;
             }
             break;
 
@@ -237,15 +226,11 @@ void GuardianStateMachine::processEvent(GuardianEvent event) {
 
                     // Transition back to SAFE_MONITORING and clear freeze
                     transitionTo(GuardianState::SAFE_MONITORING, GuardianAction::CLEAR_FREEZE);
-                } else {
-                    // Not enough good frames yet
-                    std::cout << "[RESET_PENDING] good_count=" << goodCount << "/" << recoverCount << std::endl;
                 }
 
             } else if (event == GuardianEvent::FRAME_BAD) {
                 // Bad frame during recovery breaks confidence so reset goodCount and keep waiting
                 goodCount = 0;
-                std::cout << "[RESET_PENDING] Bad frame detected, good_count reset" << std::endl;
             }
             break;
     }

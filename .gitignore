@@ -41,8 +41,11 @@
 # debug information files
 *.dwo
 
-#cmake build files
+# cmake build files
 build/
 
-# local compliance reference repos
+# Local compliance reference repos
 compliance/
+
+# Local GUI guidelines
+gui/
