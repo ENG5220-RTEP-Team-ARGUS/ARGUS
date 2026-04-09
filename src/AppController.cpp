@@ -67,8 +67,8 @@ constexpr int kDemoLowerMinOffset = -45;
 constexpr int kDemoLowerMaxOffset = 45;
 constexpr int kDemoUpperMinOffset = -45;
 constexpr int kDemoUpperMaxOffset = 45;
-constexpr int kDemoGripMinOffset = -45;
-constexpr int kDemoGripMaxOffset = 45;
+constexpr int kDemoGripMinOffset = -90;
+constexpr int kDemoGripMaxOffset = 90;
 constexpr int kDemoBaseStep = 45;
 constexpr int kDemoLowerStep = 45;
 constexpr int kDemoUpperStep = 45;
@@ -80,6 +80,7 @@ constexpr int kSurgeryBackwardOffset = -22;
 constexpr int kSurgeryPassOneDepthOffset = -12;
 constexpr int kSurgeryPassTwoDepthOffset = -24;
 constexpr int kSurgeryPassThreeDepthOffset = -36;
+constexpr int kSurgeryGripHoldOffset = 90;
 
 class MotionControllerHardwareAdapter final : public RobotHardware {
 public:
@@ -1078,17 +1079,17 @@ constexpr DemoPoseStep kDemoHomeStep{"HOME", kSmokeHomePose};
 constexpr DemoPoseStep kSurgeryRetractStep{"RETRACT_SAFE", kSurgeryRetractPose};
 
 constexpr std::array<DemoPoseStep, 11> kLiveSurgeryCutSequence = {{
-    {"HOME", {0, 0, 0, 0}},
-    {"CUT P1 FORWARD", {0, 0, kSurgeryForwardOffset, 0}},
-    {"CUT P1 DOWN", {0, kSurgeryPassOneDepthOffset, kSurgeryForwardOffset, 0}},
-    {"CUT P1 BACKWARD", {0, kSurgeryPassOneDepthOffset, kSurgeryBackwardOffset, 0}},
-    {"CUT P2 FORWARD", {0, 0, kSurgeryForwardOffset, 0}},
-    {"CUT P2 DOWN (DEEPER)", {0, kSurgeryPassTwoDepthOffset, kSurgeryForwardOffset, 0}},
-    {"CUT P2 BACKWARD", {0, kSurgeryPassTwoDepthOffset, kSurgeryBackwardOffset, 0}},
-    {"CUT P3 FORWARD", {0, 0, kSurgeryForwardOffset, 0}},
-    {"CUT P3 DOWN (FAILURE PASS)", {0, kSurgeryPassThreeDepthOffset, kSurgeryForwardOffset, 0}},
-    {"CUT P3 BACKWARD", {0, kSurgeryPassThreeDepthOffset, kSurgeryBackwardOffset, 0}},
-    {"HOME", {0, 0, 0, 0}},
+    {"GRIP +90 (TOOL)", {0, 0, 0, kSurgeryGripHoldOffset}},
+    {"CUT P1 FORWARD", {0, 0, kSurgeryForwardOffset, kSurgeryGripHoldOffset}},
+    {"CUT P1 DOWN", {0, kSurgeryPassOneDepthOffset, kSurgeryForwardOffset, kSurgeryGripHoldOffset}},
+    {"CUT P1 BACKWARD", {0, kSurgeryPassOneDepthOffset, kSurgeryBackwardOffset, kSurgeryGripHoldOffset}},
+    {"CUT P2 FORWARD", {0, 0, kSurgeryForwardOffset, kSurgeryGripHoldOffset}},
+    {"CUT P2 DOWN (DEEPER)", {0, kSurgeryPassTwoDepthOffset, kSurgeryForwardOffset, kSurgeryGripHoldOffset}},
+    {"CUT P2 BACKWARD", {0, kSurgeryPassTwoDepthOffset, kSurgeryBackwardOffset, kSurgeryGripHoldOffset}},
+    {"CUT P3 FORWARD", {0, 0, kSurgeryForwardOffset, kSurgeryGripHoldOffset}},
+    {"CUT P3 DOWN (FAILURE PASS)", {0, kSurgeryPassThreeDepthOffset, kSurgeryForwardOffset, kSurgeryGripHoldOffset}},
+    {"CUT P3 BACKWARD", {0, kSurgeryPassThreeDepthOffset, kSurgeryBackwardOffset, kSurgeryGripHoldOffset}},
+    {"HOME", {0, 0, 0, kSurgeryGripHoldOffset}},
 }};
 
 constexpr std::array<DemoPoseStep, 5> kLiveBaseScanSequence = {{
