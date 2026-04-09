@@ -2791,7 +2791,8 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
                            ? ControllerEventDisposition::Consumed
                            : ControllerEventDisposition::Abort;
             case ControllerEventKind::LiveStepReady: {
-                if (!guardian_armed || !motion_gate_open || waiting_for_ack) {
+                if (!guardian_armed || !motion_gate_open || waiting_for_ack ||
+                    pose_slew_active || freeze_command_pending) {
                     return ControllerEventDisposition::Deferred;
                 }
 
