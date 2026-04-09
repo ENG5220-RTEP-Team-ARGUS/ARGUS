@@ -367,7 +367,32 @@ Behavior:
 - logical range is clamped to `-90..+90`
 - use `Ctrl+C` or `exit` to quit
 
-#### 7) Servo calibration console
+#### 7) Controller-style servo drive
+Runs a key-driven teleop wrapper on top of `--servo-console` so you can nudge joints without typing full commands:
+
+```bash
+./scripts/servo_drive.sh
+```
+
+Default keymap:
+- `q` / `d`: base left / right
+- `z` / `s`: upper forward / backward
+- `a` / `e`: lower up / down
+- `c` / `v`: grip open / close
+- `h`: home (all joints to 0)
+- `r`: status
+- `+` / `-`: increase / decrease step size
+- `x`: exit
+
+Notes:
+- startup asks for keymap preset (`azerty`, `qwerty`, or `custom`)
+- `custom` asks one binding at a time
+- default step is `5` logical degrees
+- override step with `ARGUS_SERVO_STEP` (for example `ARGUS_SERVO_STEP=2 ./scripts/servo_drive.sh`)
+- skip startup prompt with `ARGUS_SERVO_KEYMAP=azerty` or `ARGUS_SERVO_KEYMAP=qwerty`
+- logical range is clamped to `-90..+90`
+
+#### 8) Servo calibration console
 Runs a raw-pulse calibration console for matching physical horn angle to PCA9685 pulse ticks:
 
 ```bash
@@ -398,7 +423,7 @@ Behavior:
 - `write` saves the current summary to `config/servo_calibration_latest.txt`
 - use `Ctrl+C` or `exit` to quit
 
-#### 8) Physical button test
+#### 9) Physical button test
 Runs the GPIO-backed physical button module by itself:
 
 ```bash
@@ -411,7 +436,7 @@ or directly:
 sudo -E ./build/ARGUS --button-test
 ```
 
-#### 9) Legacy full-demo alias
+#### 10) Legacy full-demo alias
 `full_demo.sh` is kept as a compatibility wrapper and now forwards to live test:
 
 ```bash
