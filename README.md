@@ -166,7 +166,7 @@ cmake --build build -j$(nproc)
 ### Setup notes for this branch
 - use the wrapper scripts for Pi camera modes; they try the compliance backend
   first and use `libcamerify` only for the OpenCV/V4L2 fallback path
-- full demo self-elevates with `sudo` because the physical button uses the GPIO character-device interface
+- `live_test.sh` self-elevates with `sudo` because the physical button uses the GPIO character-device interface
 - the current default expected marker ID is `23`
 - the project vendors Bernd Porr `cppTimer` and `libcamera2opencv` under `third_party/`
 - in auto mode, camera capture now tries the bundled Bernd backend first and
@@ -411,20 +411,14 @@ or directly:
 sudo -E ./build/ARGUS --button-test
 ```
 
-#### 9) Full pipeline hardware demo
-Runs camera + vision + guardian + interlock + motion through the normal safety path:
+#### 9) Legacy full-demo alias
+`full_demo.sh` is kept as a compatibility wrapper and now forwards to live test:
 
 ```bash
 ./scripts/full_demo.sh --camera-index 0 --expected-marker-id 23
 ```
 
-or directly:
-
-```bash
-sudo -E ./build/ARGUS --full-demo --camera-index 0 --expected-marker-id 23
-```
-
-Current full demo dance:
+Default routine (`FULL_SWEEP`) dance:
 - `BASE +45`
 - `BASE -45`
 - `HOME`
@@ -446,13 +440,8 @@ Live-test controls:
 - `3`: select routine 3 (`GRIP_PULSE`)
 - `q`: quit
 
-Full-demo controls:
-- `space`: continue
-- `a`, `r`: legacy aliases
-- `q`: quit
-
 Physical button behavior:
-- in live mode and full demo, the physical button is the default single-button operator control
+- in live mode, the physical button is the default single-button operator control
 - if disarmed and safe, press it to arm/start motion
 - if armed and running, press it again to disarm
 - if frozen and safe again, press it to acknowledge and resume
@@ -486,7 +475,7 @@ make test
 ### Hardware validation completed
 Validated on real hardware:
 - motion smoke tests
-- full demo loop
+- live routine loop
 - camera capture
 - physical button input
 - freeze / safe-again / resume path
@@ -526,7 +515,7 @@ tests/               # Unit tests
 
 ### Current branch additions
 ```text
-scripts/             # Pi helper scripts for smoke tests, calibration, button test, full demo, and home pose
+scripts/             # Pi helper scripts for smoke tests, calibration, button test, camera check, and home pose
 build/               # out-of-tree build directory used by the validated flow
 ```
 
@@ -549,7 +538,7 @@ build/               # out-of-tree build directory used by the validated flow
 ### Current implemented modules
 
 #### AppController
-- top-level orchestration for scenario demo, live test, smoke test, servo calibration, button test, and full demo
+- top-level orchestration for scenario demo, live test, smoke test, servo calibration, button test, and camera checks
 
 #### CameraCapture
 - Pi-oriented camera acquisition with V4L2-first behavior under `libcamerify`
@@ -638,9 +627,8 @@ command latency unless external measurement hardware is added.
 
 ### Current runtime notes
 - live test freezes after `30` consecutive bad frames and recovers after `3` good frames
-- full demo freezes after `1` bad frame and recovers after `3` good frames
 - live test shows focus score and safety overlays to support setup and debugging
-- live test and full demo now show these software-side latency values directly in the GUI:
+- live test now shows these software-side latency values directly in the GUI:
   - `vision_us`
   - `unsafe_detect_ms`
   - `freeze_pipeline_ms`

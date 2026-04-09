@@ -1,49 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
-    exec sudo -E "$0" "$@"
-fi
-
-requested_backend="${ARGUS_CAMERA_BACKEND:-}"
-args=()
-
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --camera-backend)
-            if [[ $# -lt 2 ]]; then
-                echo "missing value for --camera-backend" >&2
-                exit 1
-            fi
-            requested_backend="$2"
-            args+=("$1" "$2")
-            shift 2
-            ;;
-        *)
-            args+=("$1")
-            shift
-            ;;
-    esac
-done
-
-if [[ -n "$requested_backend" ]]; then
-    if [[ "$requested_backend" == "opencv" || "$requested_backend" == "videocapture" ]]; then
-        if command -v libcamerify >/dev/null 2>&1; then
-            exec libcamerify ./build/ARGUS --full-demo "${args[@]}"
-        fi
-    fi
-
-    exec ./build/ARGUS --full-demo "${args[@]}"
-fi
-
-echo "[DEMO] trying compliance camera backend first"
-if ./build/ARGUS --full-demo --camera-backend libcamera2opencv "${args[@]}"; then
-    exit 0
-fi
-
-echo "[DEMO] compliance camera backend failed; falling back to opencv"
-if command -v libcamerify >/dev/null 2>&1; then
-    exec libcamerify ./build/ARGUS --full-demo --camera-backend opencv "${args[@]}"
-fi
-
-exec ./build/ARGUS --full-demo --camera-backend opencv "${args[@]}"
+echo "[DEMO] full_demo.sh is deprecated; forwarding to live_test.sh"
+exec ./scripts/live_test.sh "$@"
