@@ -13,6 +13,7 @@
 
 #include "VisionProcessor.hpp"
 #include <cmath>
+#include <opencv2/imgproc.hpp>
 
 // Constructor
 
@@ -93,7 +94,7 @@ SafetyResult VisionProcessor::process(
         };
     };
 
-    // Stage 1: Detect all markers in frame 
+    // Stage 1: Detect all markers in frame
     //
     // markerIds:     OpenCV fills this with the ID of each detected marker.
     // markerCorners: Each detected marker gets its own inner list of four
@@ -111,7 +112,7 @@ SafetyResult VisionProcessor::process(
     // markerCorners and markerIds with whatever it finds.
     detector_.detectMarkers(frame, markerCorners, markerIds, rejected_);
 
-    // Stage 2: Early exit if nothing detected 
+    // Stage 2: Early exit if nothing detected
     //
     // Quick empty check before searching - avoids iterating an empty vector.
     if (markerIds.empty()) {
@@ -119,7 +120,7 @@ SafetyResult VisionProcessor::process(
         return makeResult(SafetyState::TOOL_NOT_DETECTED);
     }
 
-    // Stage 3: Find expected marker ID 
+    // Stage 3: Find expected marker ID
     //
     // Reject any marker with an unexpected ID - foreign markers in the
     // scene must not be mistaken for the tool.
@@ -146,7 +147,7 @@ SafetyResult VisionProcessor::process(
         center += c;
     center *= 0.25f;
 
-    // Stage 5: Safe zone check 
+    // Stage 5: Safe zone check
     //
     // Centroid must lie within the configured rectangular safe zone.
     // Any violation immediately returns OUTSIDE_ALLOWED_ZONE.
@@ -194,7 +195,7 @@ SafetyResult VisionProcessor::process(
     // Update timestamp for next frame's speed calculation.
     lastTimestamp_ = captureTimestamp;
 
-    // Stage 7: Orientation check 
+    // Stage 7: Orientation check
     //
     // Angle computed from corner[0] (top-left) to corner[1] (top-right).
     // std::atan2 returns radians — converted to degrees for config comparison.
@@ -211,7 +212,123 @@ SafetyResult VisionProcessor::process(
         }
     }
 
-    // All checks passed 
+    // Stage 8: Depth layer colour detection
+    //
+    // Detects whether the forbidden playdough layer colour is visible anywhere
+    // inside the configured safe zone ROI. Exposure of this colour indicates
+    // the tool has cut beyond the permitted depth and the robot must retract.
+    //
+    // Pipeline:
+    //   1. Crop frame to safe zone ROI — limits work to the relevant area
+    //      and keeps per-frame latency bounded.
+    //   2. Convert ROI from BGR to HSV — separates colour from brightness
+    //      for lighting-robust detection.
+    //   3. Threshold for target hue using two cv::inRange calls combined
+    //      with cv::bitwise_or. Two ranges are required for red because red
+    //      wraps around 0°/180° in OpenCV HSV (H range 0–179).
+    //   4. Count non-zero pixels in the combined mask. A pixel count
+    //      above depthPixelThreshold confirms the layer is exposed.
+    //
+    // Returning DEPTH_EXCEEDED here triggers FREEZE_NOW in GuardianFSM
+    // followed by a retract command via RobotInterlock — distinct from
+    // a standard freeze in that the robot actively retracts rather than
+    // simply halting in place.
+
+    if (config_.depthCheckEnabled) {
+
+        // Step 1: Crop to safe zone ROI.
+        //
+        // Clamp all coordinates defensively to frame bounds.
+        // Guards against runtime-adjusted ROI values (e.g. dragged via UI)
+        // that transiently extend past the image edges between frames.
+        const int roiX = std::max(0, static_cast<int>(config_.safeZoneXMin));
+        const int roiY = std::max(0, static_cast<int>(config_.safeZoneYMin));
+        const int roiW = std::min(
+            frame.cols - roiX,
+            static_cast<int>(config_.safeZoneXMax - config_.safeZoneXMin));
+        const int roiH = std::min(
+            frame.rows - roiY,
+            static_cast<int>(config_.safeZoneYMax - config_.safeZoneYMin));
+
+        // Guard: skip stage if ROI is degenerate (zero or negative dimensions).
+        // Prevents cv::Rect from throwing on a misconfigured or transitional
+        // ROI. The absence of a DEPTH_EXCEEDED result implicitly signals that
+        // the check was bypassed this frame.
+        if (roiW > 0 && roiH > 0) {
+
+            // cv::Mat::operator() with a Rect is a zero-copy view — no pixel
+            // data is duplicated. Cheap enough to be safe on every frame.
+            const cv::Mat roi = frame(cv::Rect(roiX, roiY, roiW, roiH));
+
+            // Step 2: Convert ROI from BGR to HSV.
+            //
+            // HSV isolates hue from brightness — under variable lab lighting
+            // the same playdough colour can appear significantly darker or
+            // lighter in BGR but its hue remains stable. This makes HSV
+            // thresholding substantially more reliable than BGR thresholding
+            // for a physical demo.
+            cv::Mat hsvRoi;
+            cv::cvtColor(roi, hsvRoi, cv::COLOR_BGR2HSV);
+
+            // Step 3: Threshold for target hue range.
+            //
+            // Red wraps around 0°/180° in OpenCV HSV (H: 0–179), so two
+            // separate inRange calls are combined with bitwise_or:
+            //
+            //   mask1 - lower red:  H in [depthHueLower1, depthHueUpper1]
+            //   mask2 - upper red:  H in [depthHueLower2, depthHueUpper2]
+            //
+            // For non-wrapping colours (blue, green, yellow) only mask1 is
+            // needed. Setting depthHueLower2 > depthHueUpper2 in VisionConfig
+            // causes inRange to produce an empty mask2, so the bitwise_or
+            // reduces to mask1 with no code change required.
+            cv::Mat mask1, mask2, combinedMask;
+
+            cv::inRange(
+                hsvRoi,
+                cv::Scalar(config_.depthHueLower1,
+                           config_.depthSatMin,
+                           config_.depthValMin),
+                cv::Scalar(config_.depthHueUpper1,
+                           config_.depthSatMax,
+                           config_.depthValMax),
+                mask1);
+
+            cv::inRange(
+                hsvRoi,
+                cv::Scalar(config_.depthHueLower2,
+                           config_.depthSatMin,
+                           config_.depthValMin),
+                cv::Scalar(config_.depthHueUpper2,
+                           config_.depthSatMax,
+                           config_.depthValMax),
+                mask2);
+
+            // Combine both masks — any pixel matching either hue range is
+            // considered a match. bitwise_or is O(pixels), no allocation.
+            cv::bitwise_or(mask1, mask2, combinedMask);
+
+            // Step 4: Count matching pixels.
+            //
+            // countNonZero is O(pixels) with no allocation — safe for
+            // real-time use on every frame.
+            // Compared against depthPixelThreshold to filter noise:
+            // isolated reflections or stray colour patches produce far
+            // fewer matching pixels than genuine layer exposure.
+            const int matchingPixels = cv::countNonZero(combinedMask);
+
+            if (matchingPixels >= config_.depthPixelThreshold) {
+                // Forbidden layer confirmed exposed.
+                // Reset inter-frame state so the next safe frame is not
+                // contaminated by stale previousPosition_ or lastTimestamp_
+                // values from before the retract event.
+                hasPrevious_ = false;
+                return makeResult(SafetyState::DEPTH_EXCEEDED);
+            }
+        }
+    }
+
+    // All checks passed
     // Update inter-frame state for next call's speed calculation.
     previousPosition_ = center;
     hasPrevious_ = true;

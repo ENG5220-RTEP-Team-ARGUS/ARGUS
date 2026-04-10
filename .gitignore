@@ -16,6 +16,7 @@
 
 # Debugger Files
 *.pdb
+*.codex
 
 # Compiled Dynamic libraries
 *.so
@@ -40,5 +41,15 @@
 # debug information files
 *.dwo
 
-#cmake build files
+# cmake build files
 build/
+
+# Local IDE
+.vscode/
+.codex
+
+# Local compliance reference repos
+compliance/
+
+# Local GUI guidelines
+gui/

@@ -1,181 +1,118 @@
-#include <atomic>
-#include <cstdint>
+#include "RobotInterlock.hpp"
 
-/* CONTROL EVENTS */
+#include <iostream>
 
-enum class ControlEvent {
-    FREEZE_NOW,
-    ALLOW_MOTION
-};
+RobotInterlock::RobotInterlock(RobotHardware& hardware) noexcept
+    : hardware_(hardware),
+      state_(InterlockState::SAFE),
+      operator_ack_(false),
+      freeze_reason_(FreezeReason::NONE),
+      last_guardian_tick_(0) {}
 
-/* INTERLOCK STATE */
+void RobotInterlock::onControlEvent(
+    ControlEvent event,
+    FreezeReason reason) noexcept {
+    if (event == ControlEvent::FREEZE_NOW) {
+        freeze(reason);
+    } else {
+        attemptResume();
+    }
+}
 
-enum class InterlockState {
-    SAFE,        // Motion + cutting allowed
-    FROZEN       // Motion + cutting disabled
-};
+void RobotInterlock::guardianHeartbeat(std::uint32_t tick) noexcept {
+    last_guardian_tick_.store(tick, std::memory_order_relaxed);
+}
 
-/* FREEZE REASON*/
+void RobotInterlock::watchdogCheck(
+    std::uint32_t now,
+    std::uint32_t max_allowed_delay) noexcept {
+    const std::uint32_t last =
+        last_guardian_tick_.load(std::memory_order_relaxed);
 
-enum class FreezeReason {
-    NONE,
-    MARKER_LOST,
-    MARKER_OUT_OF_ROI,
-    VISION_TIMEOUT,
-    POSITION_ERROR,
-    WATCHDOG_TIMEOUT,
-    UNKNOWN_FAULT
-};
+    if ((now - last) > max_allowed_delay) {
+        freeze(FreezeReason::WATCHDOG_TIMEOUT);
+    }
+}
 
-/* HARDWARE ABSTRACTION */
+void RobotInterlock::operatorAcknowledge() noexcept {
+    if (state_.load(std::memory_order_relaxed) == InterlockState::FROZEN) {
+        operator_ack_.store(true, std::memory_order_relaxed);
+    }
+}
 
-class RobotHardware {
-public:
-    virtual ~RobotHardware() = default;
+bool RobotInterlock::motionAllowed() const noexcept {
+    return state_.load(std::memory_order_relaxed) == InterlockState::SAFE;
+}
 
-    // Must immediately stop robot arm AND cutter
-    virtual void freezeMotion() noexcept = 0;
+FreezeReason RobotInterlock::freezeReason() const noexcept {
+    return freeze_reason_.load(std::memory_order_relaxed);
+}
 
-    // Re-enable motion only after ack + safe
-    virtual void enableMotion() noexcept = 0;
-};
+InterlockState RobotInterlock::state() const noexcept {
+    return state_.load(std::memory_order_relaxed);
+}
 
-/* ROBOT INTERLOCK */
-
-class RobotInterlock {
-public:
-    explicit RobotInterlock(RobotHardware& hardware) noexcept
-        : hardware_(hardware),
-          state_(InterlockState::SAFE),
-          operator_ack_(false),
-          freeze_reason_(FreezeReason::NONE),
-          last_guardian_tick_(0)
-    {}
-
-    /* Guardian Interface */
-
-    void onControlEvent(ControlEvent event,
-                        FreezeReason reason = FreezeReason::UNKNOWN_FAULT) noexcept
-    {
-        if (event == ControlEvent::FREEZE_NOW) {
-            freeze(reason);
-        } else { // ALLOW_MOTION
-            attemptResume();
-        }
+void RobotInterlock::freeze(FreezeReason reason) noexcept {
+    InterlockState expected = InterlockState::SAFE;
+    if (!state_.compare_exchange_strong(
+            expected,
+            InterlockState::FROZEN,
+            std::memory_order_acq_rel)) {
+        return;
     }
 
-    void guardianHeartbeat(uint32_t tick) noexcept {
-        last_guardian_tick_.store(tick, std::memory_order_relaxed);
+    freeze_reason_.store(reason, std::memory_order_relaxed);
+    operator_ack_.store(false, std::memory_order_relaxed);
+
+    if (!hardware_.freezeMotion()) {
+        std::cerr << "[INTERLOCK] Hardware freeze failed; entering FAULT state"
+                  << std::endl;
+        enterFault(FreezeReason::UNKNOWN_FAULT);
+    }
+}
+
+void RobotInterlock::attemptResume() noexcept {
+    if (state_.load(std::memory_order_relaxed) != InterlockState::FROZEN) {
+        return;
     }
 
-    /* Watchdog Interface */
-
-    // Called from RT watchdog task
-    void watchdogCheck(uint32_t now,
-                       uint32_t max_allowed_delay) noexcept
-    {
-        uint32_t last =
-            last_guardian_tick_.load(std::memory_order_relaxed);
-
-        if ((now - last) > max_allowed_delay) {
-            freeze(FreezeReason::WATCHDOG_TIMEOUT);
-        }
+    if (!operator_ack_.load(std::memory_order_relaxed)) {
+        return;
     }
 
-    /* Operator Interface */
-
-    void operatorAcknowledge() noexcept {
-        if (state_.load(std::memory_order_relaxed)
-            == InterlockState::FROZEN) {
-            operator_ack_.store(true, std::memory_order_relaxed);
-        }
+    if (!hardware_.enableMotion()) {
+        std::cerr << "[INTERLOCK] Hardware enable failed; entering FAULT state"
+                  << std::endl;
+        enterFault(FreezeReason::UNKNOWN_FAULT);
+        return;
     }
 
-    /* Motion Gating */
+    freeze_reason_.store(FreezeReason::NONE, std::memory_order_relaxed);
+    state_.store(InterlockState::SAFE, std::memory_order_release);
+}
 
-    bool motionAllowed() const noexcept {
-        return state_.load(std::memory_order_relaxed)
-               == InterlockState::SAFE;
-    }
+void RobotInterlock::enterFault(FreezeReason reason) noexcept {
+    freeze_reason_.store(reason, std::memory_order_relaxed);
+    operator_ack_.store(false, std::memory_order_relaxed);
+    state_.store(InterlockState::FAULT, std::memory_order_release);
+}
 
-    FreezeReason freezeReason() const noexcept {
-        return freeze_reason_.load(std::memory_order_relaxed);
-    }
+bool PhysicalRobotHardware::freezeMotion() noexcept {
+    // Legacy placeholder path; the live application uses the PCA9685 adapter.
+    GPIO_WritePin(ARM_ENABLE_PIN, false);
+    GPIO_WritePin(CUTTER_ENABLE_PIN, false);
+    return false;
+}
 
-    InterlockState state() const noexcept {
-        return state_.load(std::memory_order_relaxed);
-    }
+bool PhysicalRobotHardware::enableMotion() noexcept {
+    // Legacy placeholder path; the live application uses the PCA9685 adapter.
+    GPIO_WritePin(ARM_ENABLE_PIN, true);
+    GPIO_WritePin(CUTTER_ENABLE_PIN, true);
+    return false;
+}
 
-private:
-    /* Internal Logic */
-
-    void freeze(FreezeReason reason) noexcept {
-        InterlockState expected = InterlockState::SAFE;
-        if (state_.compare_exchange_strong(
-                expected,
-                InterlockState::FROZEN,
-                std::memory_order_acq_rel)) {
-
-            freeze_reason_.store(reason,
-                                 std::memory_order_relaxed);
-            operator_ack_.store(false,
-                                std::memory_order_relaxed);
-
-            hardware_.freezeMotion();   // HARD PHYSICAL STOP
-        }
-    }
-
-    void attemptResume() noexcept {
-        if (state_.load(std::memory_order_relaxed)
-            != InterlockState::FROZEN)
-            return;
-
-        if (!operator_ack_.load(std::memory_order_relaxed))
-            return;
-
-        hardware_.enableMotion();
-        freeze_reason_.store(FreezeReason::NONE,
-                             std::memory_order_relaxed);
-        state_.store(InterlockState::SAFE,
-                     std::memory_order_release);
-    }
-
-private:
-    RobotHardware& hardware_;
-    std::atomic<InterlockState> state_;
-    std::atomic<bool> operator_ack_;
-    std::atomic<FreezeReason> freeze_reason_;
-    std::atomic<uint32_t> last_guardian_tick_;
-};
-
-/* PHYSICAL HARDWARE IMPLEMENTATION */
-
-class PhysicalRobotHardware final : public RobotHardware {
-public:
-    void freezeMotion() noexcept override {
-        // Stop robot arm immediately
-        GPIO_WritePin(ARM_ENABLE_PIN, false);
-
-        // Stop cutting tool immediately
-        GPIO_WritePin(CUTTER_ENABLE_PIN, false);
-    }
-
-    void enableMotion() noexcept override {
-        // Re-enable ONLY after ack + safe
-        GPIO_WritePin(ARM_ENABLE_PIN, true);
-        GPIO_WritePin(CUTTER_ENABLE_PIN, true);
-    }
-
-private:
-    static void GPIO_WritePin(int pin, bool value) noexcept {
-        // Replace with:
-        // HAL_GPIO_WritePin(...)
-        // direct register write
-        // safety relay / STO control
-        (void)pin;
-        (void)value;
-    }
-
-    static constexpr int ARM_ENABLE_PIN    = 1;
-    static constexpr int CUTTER_ENABLE_PIN = 2;
-};
+void PhysicalRobotHardware::GPIO_WritePin(int pin, bool value) noexcept {
+    // Replace with platform-specific GPIO or safety relay API.
+    (void)pin;
+    (void)value;
+}

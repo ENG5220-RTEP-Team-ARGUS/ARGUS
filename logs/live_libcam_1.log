@@ -1,0 +1,16 @@
+[LIVE_TEST] Starting live marker safety test mode
+[LIVE_TEST] Camera index: 0
+[LIVE_TEST] Expected marker ID: 23
+[LIVE_TEST] Camera backend preference: libcamera2opencv
+[LIVE_TEST] Auto operator ack: OFF
+[LIVE_TEST] Physical button = single-button control
+[LIVE_TEST] Controls: space/button=single-button control, a/r/d=aliases, 1/2/3=select routine, q=quit
+[LIVE_TEST] Starting in DISARMED setup mode
+[LIVE_TEST] Guardian thresholds: freeze after 30 consecutive bad frames, recover after 3 consecutive good frames.
+[LIVE_TEST] Routines: 1=FULL_SWEEP, 2=BASE_SCAN, 3=GRIP_PULSE
+[LIVE_TEST] Focus debug enabled: FOCUS_SCORE (Laplacian variance), higher usually means sharper marker edges.
+[CameraCapture] Opened via libcamera2opencv callback backend
+[LIVE_TEST] Camera backend active: libcamera2opencv (LIBCAMERA2OPENCV)
+[INIT] Guardian State Machine initialized with freezeCount=30, recoverCount=3
+[LIVE_TEST] Physical button module: configured (/dev/gpiochip0 named GPIO24 (offset 24), initial=RELEASED, debounce=50ms)
+[LIVE_TEST] status: armed=NO safe=NO waiting=NO routine=1 vision=TOOL_NOT_DETECTED guardian=DISARMED_SETUP interlock=DISARMED motion_ctrl=DISABLED freeze_reason=N/A

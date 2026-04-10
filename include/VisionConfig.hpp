@@ -34,7 +34,7 @@
  */
 struct VisionConfig {
 
-    // Marker Identification 
+    // Marker Identification
 
     /**
      * @brief The ArUco marker ID the system expects to detect.
@@ -45,7 +45,7 @@ struct VisionConfig {
      */
     int expectedMarkerId = 23;
 
-    // Speed Threshold 
+    // Speed Threshold
 
     /**
      * @brief Maximum permitted marker centroid displacement in pixels/second.
@@ -57,7 +57,7 @@ struct VisionConfig {
      */
     float maxSpeed = 200.0f;
 
-    // Safe Zone (pixels, full camera frame coordinates) 
+    // Safe Zone (pixels, full camera frame coordinates)
     //
     // Defines a rectangular region within which the marker centroid must
     // remain for the system to report SAFE. Any centroid outside this
@@ -124,4 +124,79 @@ struct VisionConfig {
      * Change here to switch dictionary without modifying VisionProcessor.
      */
     int dictionaryId = cv::aruco::DICT_6X6_250;
+
+    // Depth layer colour detection
+    //
+    // The forbidden layer is a specific playdough colour (e.g. red) placed
+    // beneath the permitted cutting layers. When this colour becomes visible
+    // inside the ROI the tool has exceeded its permitted depth and the robot
+    // must freeze and retract immediately.
+    //
+    // HSV is used in preference to BGR because it separates colour (hue)
+    // from brightness (value), making detection robust under variable
+    // lighting conditions — critical for a physical hardware demo under
+    // lab fluorescent lighting.
+    //
+    // OpenCV HSV channel ranges:
+    //   H (hue):        0 – 179   (half of the 360° colour wheel)
+    //   S (saturation): 0 – 255
+    //   V (value):      0 – 255
+    //
+    // Red requires two hue ranges because it wraps around 0° / 180°:
+    //   Range 1 (lower red): H = 0  – 10
+    //   Range 2 (upper red): H = 160 – 179
+    // For non-wrapping colours (blue, green, yellow) only range 1 is
+    // needed — set depthHueLower2 > depthHueUpper2 to produce an empty
+    // mask2 so the bitwise_or in Stage 8 reduces to mask1 alone.
+
+    int depthHueLower1 = 0;     ///< Lower hue bound for range 1.
+                                ///< For red: 0. Adjust for other colours.
+
+    int depthHueUpper1 = 10;    ///< Upper hue bound for range 1.
+                                ///< For red: 10. Adjust for other colours.
+
+    int depthHueLower2 = 160;   ///< Lower hue bound for range 2.
+                                ///< For red: 160. Set > depthHueUpper2 to
+                                ///< disable range 2 for non-wrapping colours.
+
+    int depthHueUpper2 = 179;   ///< Upper hue bound for range 2.
+                                ///< For red: 179.
+
+    int depthSatMin = 100;      ///< Minimum saturation threshold.
+                                ///< Filters washed-out or near-grey pixels
+                                ///< that share the target hue by coincidence.
+
+    int depthSatMax = 255;      ///< Maximum saturation threshold.
+
+    int depthValMin = 50;       ///< Minimum value (brightness) threshold.
+                                ///< Filters very dark pixels that appear
+                                ///< to match the hue under shadow conditions.
+
+    int depthValMax = 255;      ///< Maximum value threshold.
+
+    /**
+     * @brief Minimum number of HSV-matching pixels required to confirm
+     *        the forbidden layer is exposed.
+     *
+     * Acts as a noise gate - isolated reflections, stray colour patches,
+     * or single-pixel sensor noise will not trigger a freeze. If false
+     * positives occur during testing, increase this value. If the system
+     * is slow to detect a genuine exposure, decrease it.
+     *
+     * Recommended starting point: 500 pixels at 640x480 resolution.
+     */
+    int depthPixelThreshold = 500;
+
+    /**
+     * @brief Runtime enable/disable flag for Stage 8 colour detection.
+     *
+     * Allows the depth check to be toggled from the UI without
+     * recompiling. Satisfies the brief requirement for mouse-adjustable
+     * parameters and supports testing of the remaining pipeline stages
+     * in isolation.
+     *
+     * true  = Stage 8 active (default, production behaviour).
+     * false = Stage 8 bypassed (testing / calibration mode).
+     */
+    bool depthCheckEnabled = true;
 };
