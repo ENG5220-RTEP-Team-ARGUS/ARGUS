@@ -127,7 +127,7 @@ struct VisionConfig {
 
     // Depth layer colour detection
     //
-    // The forbidden layer is a specific playdough colour (e.g. red) placed
+    // The forbidden layer is a specific playdough colour (blue) placed
     // beneath the permitted cutting layers. When this colour becomes visible
     // inside the ROI the tool has exceeded its permitted depth and the robot
     // must freeze and retract immediately.
@@ -142,25 +142,16 @@ struct VisionConfig {
     //   S (saturation): 0 – 255
     //   V (value):      0 – 255
     //
-    // Red requires two hue ranges because it wraps around 0° / 180°:
-    //   Range 1 (lower red): H = 0  – 10
-    //   Range 2 (upper red): H = 160 – 179
-    // For non-wrapping colours (blue, green, yellow) only range 1 is
-    // needed — set depthHueLower2 > depthHueUpper2 to produce an empty
-    // mask2 so the bitwise_or in Stage 8 reduces to mask1 alone.
+    // Blue does not wrap around the HSV wheel, so only range 1 is needed.
+    // Range 2 is disabled by setting depthHueLower2 > depthHueUpper2,
+    // which causes cv::inRange to produce an empty mask2 so the
+    // bitwise_or in Stage 8 reduces to mask1 alone.
 
-    int depthHueLower1 = 0;     ///< Lower hue bound for range 1.
-                                ///< For red: 0. Adjust for other colours.
+    int depthHueLower1 = 100;   ///< Lower hue bound for blue.
+    int depthHueUpper1 = 130;   ///< Upper hue bound for blue.
 
-    int depthHueUpper1 = 10;    ///< Upper hue bound for range 1.
-                                ///< For red: 10. Adjust for other colours.
-
-    int depthHueLower2 = 160;   ///< Lower hue bound for range 2.
-                                ///< For red: 160. Set > depthHueUpper2 to
-                                ///< disable range 2 for non-wrapping colours.
-
-    int depthHueUpper2 = 179;   ///< Upper hue bound for range 2.
-                                ///< For red: 179.
+    int depthHueLower2 = 255;   ///< Disabled - lower > upper produces empty mask2.
+    int depthHueUpper2 = 0;     ///< Disabled - see depthHueLower2 above.
 
     int depthSatMin = 100;      ///< Minimum saturation threshold.
                                 ///< Filters washed-out or near-grey pixels
