@@ -377,18 +377,19 @@ Runs a key-driven teleop wrapper on top of `--servo-console` so you can nudge jo
 Default keymap presets:
 - `azerty`: `d` / `q` base left/right, `z` / `s` upper forward/backward, `i` / `k` lower up/down, `l` / `j` grip open/close
 - `qwerty`: `a` rotate left (anti-clockwise), `d` rotate right (clockwise), `w` forward, `s` backward, `i` up, `k` down, `j` open, `l` close
+- `mouse`: `q` / `d` base left/right, `z` / `s` upper forward/backward, mouse wheel up/down = lower up/down, mouse left/right click = grip close/open
 - `h`: home (all joints to 0)
 - `r`: status
 - `+` / `-`: increase / decrease step size
 - `x`: go home, wait briefly, then exit
 
 Notes:
-- startup asks for keymap preset (`azerty`, `qwerty`, or `custom`)
+- startup asks for keymap preset (`azerty`, `qwerty`, `mouse`, or `custom`)
 - `custom` asks one binding at a time
 - default step is `5` logical degrees
 - override step with `ARGUS_SERVO_STEP` (for example `ARGUS_SERVO_STEP=2 ./scripts/servo_drive.sh`)
 - default exit-home wait is `1.0s`; override with `ARGUS_SERVO_EXIT_HOME_WAIT_S`
-- skip startup prompt with `ARGUS_SERVO_KEYMAP=azerty` or `ARGUS_SERVO_KEYMAP=qwerty`
+- skip startup prompt with `ARGUS_SERVO_KEYMAP=azerty`, `ARGUS_SERVO_KEYMAP=qwerty`, or `ARGUS_SERVO_KEYMAP=mouse`
 - logical range is clamped to `-90..+90`
 
 #### 8) Servo calibration console
