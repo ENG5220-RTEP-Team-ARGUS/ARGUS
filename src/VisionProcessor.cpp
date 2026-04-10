@@ -94,7 +94,7 @@ SafetyResult VisionProcessor::process(
         };
     };
 
-    // Stage 1: Detect all markers in frame
+    /*// Stage 1: Detect all markers in frame
     //
     // markerIds:     OpenCV fills this with the ID of each detected marker.
     // markerCorners: Each detected marker gets its own inner list of four
@@ -210,7 +210,7 @@ SafetyResult VisionProcessor::process(
             hasPrevious_ = false;
             return makeResult(SafetyState::INVALID_ORIENTATION);
         }
-    }
+    }*/
 
     // Stage 8: Depth layer colour detection
     //
