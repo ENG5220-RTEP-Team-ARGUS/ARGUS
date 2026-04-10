@@ -330,8 +330,8 @@ SafetyResult VisionProcessor::process(
 
     // All checks passed
     // Update inter-frame state for next call's speed calculation.
-    previousPosition_ = center;
-    hasPrevious_ = true;
+    // previousPosition_ = center;
+    hasPrevious_ = false;
 
     return makeResult(SafetyState::SAFE);
 }
