@@ -34,7 +34,7 @@
  */
 struct VisionConfig {
 
-    // Marker Identification 
+    // Marker Identification
 
     /**
      * @brief The ArUco marker ID the system expects to detect.
@@ -45,7 +45,7 @@ struct VisionConfig {
      */
     int expectedMarkerId = 23;
 
-    // Speed Threshold 
+    // Speed Threshold
 
     /**
      * @brief Maximum permitted marker centroid displacement in pixels/second.
@@ -57,7 +57,7 @@ struct VisionConfig {
      */
     float maxSpeed = 200.0f;
 
-    // Safe Zone (pixels, full camera frame coordinates) 
+    // Safe Zone (pixels, full camera frame coordinates)
     //
     // Defines a rectangular region within which the marker centroid must
     // remain for the system to report SAFE. Any centroid outside this
@@ -125,7 +125,7 @@ struct VisionConfig {
      */
     int dictionaryId = cv::aruco::DICT_6X6_250;
 
-    // Depth layer colour detection 
+    // Depth layer colour detection
     //
     // The forbidden layer is a specific playdough colour (e.g. red) placed
     // beneath the permitted cutting layers. When this colour becomes visible
@@ -148,32 +148,32 @@ struct VisionConfig {
     // For non-wrapping colours (blue, green, yellow) only range 1 is
     // needed — set depthHueLower2 > depthHueUpper2 to produce an empty
     // mask2 so the bitwise_or in Stage 8 reduces to mask1 alone.
-    
+
     int depthHueLower1 = 0;     ///< Lower hue bound for range 1.
                                 ///< For red: 0. Adjust for other colours.
-    
+
     int depthHueUpper1 = 10;    ///< Upper hue bound for range 1.
                                 ///< For red: 10. Adjust for other colours.
-    
+
     int depthHueLower2 = 160;   ///< Lower hue bound for range 2.
                                 ///< For red: 160. Set > depthHueUpper2 to
                                 ///< disable range 2 for non-wrapping colours.
-    
+
     int depthHueUpper2 = 179;   ///< Upper hue bound for range 2.
                                 ///< For red: 179.
-    
+
     int depthSatMin = 100;      ///< Minimum saturation threshold.
                                 ///< Filters washed-out or near-grey pixels
                                 ///< that share the target hue by coincidence.
-    
+
     int depthSatMax = 255;      ///< Maximum saturation threshold.
-    
+
     int depthValMin = 50;       ///< Minimum value (brightness) threshold.
                                 ///< Filters very dark pixels that appear
                                 ///< to match the hue under shadow conditions.
-    
+
     int depthValMax = 255;      ///< Maximum value threshold.
-    
+
     /**
      * @brief Minimum number of HSV-matching pixels required to confirm
      *        the forbidden layer is exposed.
@@ -186,7 +186,7 @@ struct VisionConfig {
      * Recommended starting point: 500 pixels at 640x480 resolution.
      */
     int depthPixelThreshold = 500;
-    
+
     /**
      * @brief Runtime enable/disable flag for Stage 8 colour detection.
      *
