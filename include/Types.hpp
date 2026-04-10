@@ -33,7 +33,12 @@ enum class SafetyState {
     EXCESSIVE_SPEED,
 
     /** Marker rotation falls outside the configured angular range. */
-    INVALID_ORIENTATION
+    INVALID_ORIENTATION,
+
+    DEPTH_EXCEEDED, ///< The forbidden playdough layer colour was detected
+                    ///< within the ROI, indicating the tool has penetrated
+                    ///< beyond the permitted depth. Triggers an immediate
+                    ///< FREEZE_NOW event and retract command via RobotInterlock.
 };
 
 /**
