@@ -3,6 +3,7 @@ project(ARGUS)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthread")
 
 option(ARGUS_ENABLE_LIBCAMERA2OPENCV
        "Enable bundled libcamera2opencv camera backend when dependencies are available"
@@ -11,6 +12,7 @@ option(ARGUS_ENABLE_LIBCAMERA2OPENCV
 find_package(OpenCV REQUIRED)
 find_package(Threads REQUIRED)
 
+# Main ARGUS executable
 add_executable(ARGUS
     src/main.cpp
     src/AppController.cpp
