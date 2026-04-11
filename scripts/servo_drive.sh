@@ -85,11 +85,23 @@ set_azerty_keymap() {
     KEY_GRIP_CLOSE="j"
 }
 
-set_mouse_keymap() {
+set_mouse_azerty_keymap() {
     MOUSE_MODE=1
     KEY_BASE_LEFT="q"
     KEY_BASE_RIGHT="d"
     KEY_UPPER_FORWARD="z"
+    KEY_UPPER_BACKWARD="s"
+    KEY_LOWER_UP=""
+    KEY_LOWER_DOWN=""
+    KEY_GRIP_OPEN=""
+    KEY_GRIP_CLOSE=""
+}
+
+set_mouse_qwerty_keymap() {
+    MOUSE_MODE=1
+    KEY_BASE_LEFT="a"
+    KEY_BASE_RIGHT="d"
+    KEY_UPPER_FORWARD="w"
     KEY_UPPER_BACKWARD="s"
     KEY_LOWER_UP=""
     KEY_LOWER_DOWN=""
@@ -185,15 +197,17 @@ configure_keymap() {
         echo "[DRIVE] Select keymap preset:"
         echo "[DRIVE]   1) azerty (d/q z/s i/k l/j)"
         echo "[DRIVE]   2) qwerty (d/a w/s i/k l/j)"
-        echo "[DRIVE]   3) mouse (q/d z/s + mouse wheel/click)"
-        echo "[DRIVE]   4) custom"
-        read -rp "[DRIVE] choice [1/2/3/4] (default: 1): " choice
+        echo "[DRIVE]   3) mouse-azerty (q/d z/s + mouse wheel/click)"
+        echo "[DRIVE]   4) mouse-qwerty (a/d w/s + mouse wheel/click)"
+        echo "[DRIVE]   5) custom"
+        read -rp "[DRIVE] choice [1/2/3/4/5] (default: 1): " choice
         choice="${choice:-1}"
         case "$choice" in
             1) mode="azerty" ;;
             2) mode="qwerty" ;;
-            3) mode="mouse" ;;
-            4) mode="custom" ;;
+            3) mode="mouse-azerty" ;;
+            4) mode="mouse-qwerty" ;;
+            5) mode="custom" ;;
             *)
                 echo "[DRIVE] Unknown choice '$choice', defaulting to azerty."
                 mode="azerty"
@@ -210,7 +224,14 @@ configure_keymap() {
             set_qwerty_keymap
             ;;
         mouse)
-            set_mouse_keymap
+            echo "[DRIVE] ARGUS_SERVO_KEYMAP=mouse is deprecated; using mouse-azerty."
+            set_mouse_azerty_keymap
+            ;;
+        mouse-azerty|mouse_azerty)
+            set_mouse_azerty_keymap
+            ;;
+        mouse-qwerty|mouse_qwerty)
+            set_mouse_qwerty_keymap
             ;;
         custom)
             set_azerty_keymap
@@ -225,7 +246,7 @@ configure_keymap() {
             KEY_GRIP_CLOSE="$(prompt_single_key "grip close" "$KEY_GRIP_CLOSE")"
             ;;
         *)
-            echo "[DRIVE] Unknown ARGUS_SERVO_KEYMAP='$mode'. Use azerty, qwerty, mouse, or custom." >&2
+            echo "[DRIVE] Unknown ARGUS_SERVO_KEYMAP='$mode'. Use azerty, qwerty, mouse-azerty, mouse-qwerty, or custom." >&2
             exit 1
             ;;
     esac
