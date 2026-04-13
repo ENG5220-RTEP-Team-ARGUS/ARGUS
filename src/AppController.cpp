@@ -1311,8 +1311,10 @@ void drawMetricsDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
     const cv::Scalar panel_border(220, 220, 220);
     const cv::Scalar primary_text(25, 25, 25);
     const cv::Scalar muted_text(120, 120, 120);
-    const cv::Scalar info_color(170, 140, 60);
+    const cv::Scalar moderate_color(50, 180, 230);
     const cv::Scalar white(255, 255, 255);
+    const cv::Scalar good_color(60, 170, 80);
+    const cv::Scalar slow_color(60, 60, 200);
 
     frame.setTo(panel_fill);
     drawPanel(frame,
@@ -1349,14 +1351,14 @@ void drawMetricsDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
                 1);
 
     cv::putText(frame,
-                "FOCUS + LATENCY",
+                "FOCUS + EVENT LATENCY",
                 cv::Point(12, header_height + 22),
                 uiPlainFontFace(),
                 1.0,
                 model.state_color,
                 1);
     cv::putText(frame,
-                "Event metrics and trend",
+                "Threshold-based safety timing",
                 cv::Point(12, header_height + 34),
                 cv::FONT_HERSHEY_SIMPLEX,
                 0.32,
@@ -1405,7 +1407,40 @@ void drawMetricsDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
     y += 74;
 
     cv::putText(frame,
-                "LATENCY",
+                "VISION PIPELINE (CONTINUOUS)",
+                cv::Point(card_margin + 2, y + 8),
+                cv::FONT_HERSHEY_SIMPLEX,
+                0.34,
+                muted_text,
+                1);
+    y += 16;
+    drawLine(frame,
+             cv::Point(card_margin, y),
+             cv::Point(width - card_margin, y),
+             panel_border,
+             1);
+    y += 10;
+    drawPanel(frame,
+              cv::Point(card_margin, y),
+              cv::Point(card_margin + card_width, y + 54),
+              white,
+              panel_border);
+    cv::putText(frame,
+                "vision_us " + std::to_string(model.latency.vision_us),
+                cv::Point(card_margin + 10, y + 16),
+                uiPlainFontFace(),
+                0.95,
+                primary_text,
+                1);
+    drawSparkline(frame,
+                  cv::Point(card_margin + 10, y + 22),
+                  cv::Point(width - 20, y + 46),
+                  model.vision_latency_history_us,
+                  primary_text);
+    y += 66;
+
+    cv::putText(frame,
+                "EVENT LATENCY (LOWER IS BETTER)",
                 cv::Point(card_margin + 2, y + 8),
                 cv::FONT_HERSHEY_SIMPLEX,
                 0.34,
@@ -1419,49 +1454,97 @@ void drawMetricsDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
              1);
     y += 14;
 
-    auto drawLatencyRow = [&](const std::string& label,
-                              const std::string& value,
-                              const std::vector<double>& history,
-                              const cv::Scalar& color) {
+    auto drawLatencyBar = [&](const std::string& label,
+                              const std::optional<long long>& value_ms,
+                              long long good_threshold_ms) {
+        const long long moderate_threshold_ms = good_threshold_ms * 2;
+        const int card_height = 66;
+        const int x1 = card_margin;
+        const int x2 = card_margin + card_width;
+
+        drawPanel(frame,
+                  cv::Point(x1, y),
+                  cv::Point(x2, y + card_height),
+                  white,
+                  panel_border);
+
         cv::putText(frame,
-                    label + " " + value,
-                    cv::Point(card_margin + 2, y),
+                    label,
+                    cv::Point(x1 + 10, y + 15),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.34,
+                    muted_text,
+                    1);
+        cv::putText(frame,
+                    "target <= " + std::to_string(good_threshold_ms) + " ms",
+                    cv::Point(x1 + 130, y + 15),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.32,
+                    muted_text,
+                    1);
+
+        const int bar_x1 = x1 + 10;
+        const int bar_x2 = x2 - 10;
+        const int bar_y1 = y + 22;
+        const int bar_y2 = y + 40;
+        drawPanel(frame,
+                  cv::Point(bar_x1, bar_y1),
+                  cv::Point(bar_x2, bar_y2),
+                  cv::Scalar(235, 235, 235),
+                  panel_border);
+
+        cv::Scalar status_color = muted_text;
+        std::string status_text = "NO EVENT";
+        std::string value_text = "N/A";
+        int fill_width = 0;
+
+        if (value_ms.has_value()) {
+            const long long value = *value_ms;
+            value_text = std::to_string(value) + " ms";
+
+            if (value <= good_threshold_ms) {
+                status_text = "GOOD";
+                status_color = good_color;
+            } else if (value <= moderate_threshold_ms) {
+                status_text = "MODERATE";
+                status_color = moderate_color;
+            } else {
+                status_text = "SLOW";
+                status_color = slow_color;
+            }
+
+            const double fraction =
+                std::clamp(static_cast<double>(value) /
+                               static_cast<double>(moderate_threshold_ms),
+                           0.0,
+                           1.0);
+            fill_width = std::max(
+                1,
+                static_cast<int>((bar_x2 - bar_x1 - 2) * fraction));
+        }
+
+        if (fill_width > 0) {
+            drawRectangle(frame,
+                          cv::Point(bar_x1 + 1, bar_y1 + 1),
+                          cv::Point(bar_x1 + 1 + fill_width, bar_y2 - 1),
+                          status_color,
+                          -1);
+        }
+
+        cv::putText(frame,
+                    value_text + "  " + status_text,
+                    cv::Point(x1 + 10, y + 57),
                     uiPlainFontFace(),
                     0.95,
-                    color,
+                    status_color,
                     1);
-        drawSparkline(frame,
-                      cv::Point(card_margin + 2, y + 4),
-                      cv::Point(width - 20, y + 20),
-                      history,
-                      color);
-        y += 28;
+
+        y += card_height + 8;
     };
 
-    drawLatencyRow("vision_us",
-                   std::to_string(model.latency.vision_us),
-                   model.vision_latency_history_us,
-                   primary_text);
-    drawLatencyRow("unsafe_ms",
-                   formatLatencyMilliseconds(model.latency.unsafe_detect_ms),
-                   model.unsafe_detect_history_ms,
-                   info_color);
-    drawLatencyRow("freeze_pipeline_ms",
-                   formatLatencyMilliseconds(model.latency.freeze_pipeline_ms),
-                   model.freeze_pipeline_history_ms,
-                   cv::Scalar(90, 140, 220));
-    drawLatencyRow("freeze_cmd_ms",
-                   formatLatencyMilliseconds(model.latency.freeze_cmd_ms),
-                   model.freeze_cmd_history_ms,
-                   primary_text);
-    drawLatencyRow("stop_ms",
-                   formatLatencyMilliseconds(model.latency.total_stop_ms),
-                   model.total_stop_history_ms,
-                   severityColor(formatLatencyMilliseconds(model.latency.total_stop_ms)));
-    drawLatencyRow("ack_resume_ms",
-                   formatLatencyMilliseconds(model.latency.ack_to_resume_ms),
-                   model.ack_resume_history_ms,
-                   cv::Scalar(120, 100, 180));
+    drawLatencyBar("Unsafe detect", model.latency.unsafe_detect_ms, 30);
+    drawLatencyBar("Freeze pipeline", model.latency.freeze_pipeline_ms, 3000);
+    drawLatencyBar("Total stop", model.latency.total_stop_ms, 6000);
 
     const cv::Scalar border_color =
         model.emphasise_danger ? cv::Scalar(60, 60, 200) : model.state_color;
