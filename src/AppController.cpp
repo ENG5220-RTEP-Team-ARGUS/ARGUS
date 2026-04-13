@@ -34,6 +34,7 @@ namespace {
 
 constexpr const char* kLiveCameraWindowName = "ARGUS Live Camera";
 constexpr const char* kLiveStatusWindowName = "ARGUS Live Status";
+constexpr const char* kLiveMetricsWindowName = "ARGUS Live Metrics";
 constexpr const char* kDefaultI2cDevicePath = "/dev/i2c-1";
 constexpr std::uint8_t kDefaultPca9685Address = 0x40;
 constexpr float kDefaultPwmFrequencyHz = 50.0f;
@@ -1083,7 +1084,6 @@ void drawStatusDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
     const cv::Scalar panel_border(220, 220, 220);
     const cv::Scalar primary_text(25, 25, 25);
     const cv::Scalar muted_text(120, 120, 120);
-    const cv::Scalar info_color(170, 140, 60);
     const cv::Scalar white(255, 255, 255);
 
     frame.setTo(panel_fill);
@@ -1289,57 +1289,153 @@ void drawStatusDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
         ry += 14;
     }
 
-    if (model.show_focus) {
-        ry += 6;
-        drawSectionTitle("FOCUS");
-        drawPanel(frame,
-                  cv::Point(rx, ry),
-                  cv::Point(width - 20, ry + 16),
-                  cv::Scalar(235, 235, 235),
-                  panel_border);
-        const int bar_width = std::max(
-            0,
-            static_cast<int>((width - rx - 22) *
-                             std::clamp(model.focus_fraction, 0.0, 1.0)));
-        if (bar_width > 0) {
-            drawRectangle(frame,
-                          cv::Point(rx + 1, ry + 1),
-                          cv::Point(rx + bar_width, ry + 15),
-                          model.focus_color,
-                          -1);
-        }
-        ry += 30;
-        cv::putText(frame,
-                    model.focus_label,
-                    cv::Point(rx, ry),
-                    uiPlainFontFace(),
-                    1.0,
-                    model.focus_color,
-                    1);
-        ry += 16;
+    const cv::Scalar border_color =
+        model.emphasise_danger ? cv::Scalar(60, 60, 200) : model.state_color;
+    drawRectangle(frame,
+                  cv::Point(2, 2),
+                  cv::Point(width - 3, height - 3),
+                  border_color,
+                  model.emphasise_danger ? 4 : 2);
+}
+
+void drawMetricsDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
+    if (frame.empty()) {
+        return;
     }
 
-    ry += 6;
-    drawSectionTitle("LATENCY");
+    const int width = frameWidth(frame);
+    const int header_height = 52;
+    const int state_bar_height = 32;
+    const int body_top = header_height + state_bar_height + 8;
+    const cv::Scalar panel_fill(245, 245, 245);
+    const cv::Scalar panel_border(220, 220, 220);
+    const cv::Scalar primary_text(25, 25, 25);
+    const cv::Scalar muted_text(120, 120, 120);
+    const cv::Scalar info_color(170, 140, 60);
+    const cv::Scalar white(255, 255, 255);
+
+    frame.setTo(panel_fill);
+    drawPanel(frame,
+              cv::Point(0, 0),
+              cv::Point(width - 1, header_height),
+              panel_fill,
+              panel_border);
+    drawPanel(frame,
+              cv::Point(0, header_height),
+              cv::Point(width - 1, header_height + state_bar_height),
+              panel_fill,
+              panel_border);
+
+    cv::putText(frame,
+                "ARGUS",
+                cv::Point(12, 23),
+                cv::FONT_HERSHEY_SIMPLEX,
+                0.55,
+                primary_text,
+                2);
+    cv::putText(frame,
+                "Metrics",
+                cv::Point(12, 38),
+                cv::FONT_HERSHEY_SIMPLEX,
+                0.35,
+                muted_text,
+                1);
+    cv::putText(frame,
+                model.mode_title,
+                cv::Point(width - 124, 31),
+                uiPlainFontFace(),
+                0.9,
+                primary_text,
+                1);
+
+    cv::putText(frame,
+                "FOCUS + LATENCY",
+                cv::Point(12, header_height + 22),
+                uiPlainFontFace(),
+                1.0,
+                model.state_color,
+                1);
+    cv::putText(frame,
+                "Event metrics and trend",
+                cv::Point(12, header_height + 34),
+                cv::FONT_HERSHEY_SIMPLEX,
+                0.32,
+                muted_text,
+                1);
+
+    const int card_margin = 12;
+    const int card_width = width - (2 * card_margin);
+    int y = body_top;
+
+    drawPanel(frame,
+              cv::Point(card_margin, y),
+              cv::Point(card_margin + card_width, y + 62),
+              white,
+              panel_border);
+    cv::putText(frame,
+                "FOCUS",
+                cv::Point(card_margin + 10, y + 15),
+                cv::FONT_HERSHEY_SIMPLEX,
+                0.34,
+                muted_text,
+                1);
+    drawPanel(frame,
+              cv::Point(card_margin + 10, y + 22),
+              cv::Point(width - 22, y + 38),
+              cv::Scalar(235, 235, 235),
+              panel_border);
+    const int bar_width = std::max(
+        0,
+        static_cast<int>((width - card_margin - 34) *
+                         std::clamp(model.focus_fraction, 0.0, 1.0)));
+    if (model.show_focus && bar_width > 0) {
+        drawRectangle(frame,
+                      cv::Point(card_margin + 11, y + 23),
+                      cv::Point(card_margin + 11 + bar_width, y + 37),
+                      model.focus_color,
+                      -1);
+    }
+    cv::putText(frame,
+                model.show_focus ? model.focus_label : "N/A",
+                cv::Point(card_margin + 10, y + 56),
+                uiPlainFontFace(),
+                0.95,
+                model.show_focus ? model.focus_color : muted_text,
+                1);
+    y += 74;
+
+    cv::putText(frame,
+                "LATENCY",
+                cv::Point(card_margin + 2, y + 8),
+                cv::FONT_HERSHEY_SIMPLEX,
+                0.34,
+                muted_text,
+                1);
+    y += 16;
+    drawLine(frame,
+             cv::Point(card_margin, y),
+             cv::Point(width - card_margin, y),
+             panel_border,
+             1);
+    y += 14;
+
     auto drawLatencyRow = [&](const std::string& label,
                               const std::string& value,
                               const std::vector<double>& history,
                               const cv::Scalar& color) {
         cv::putText(frame,
                     label + " " + value,
-                    cv::Point(rx, ry),
+                    cv::Point(card_margin + 2, y),
                     uiPlainFontFace(),
                     0.95,
                     color,
                     1);
-        const int plot_top = ry + 4;
-        const int plot_bottom = ry + 20;
         drawSparkline(frame,
-                      cv::Point(rx, plot_top),
-                      cv::Point(width - 20, plot_bottom),
+                      cv::Point(card_margin + 2, y + 4),
+                      cv::Point(width - 20, y + 20),
                       history,
                       color);
-        ry += 28;
+        y += 28;
     };
 
     drawLatencyRow("vision_us",
@@ -1371,7 +1467,7 @@ void drawStatusDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
         model.emphasise_danger ? cv::Scalar(60, 60, 200) : model.state_color;
     drawRectangle(frame,
                   cv::Point(2, 2),
-                  cv::Point(width - 3, height - 3),
+                  cv::Point(width - 3, frameHeight(frame) - 3),
                   border_color,
                   model.emphasise_danger ? 4 : 2);
 }
@@ -3544,7 +3640,9 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
     });
 
     constexpr int kLiveStatusWidth = 430;
+    constexpr int kLiveMetricsWidth = 430;
     cv::Mat status_frame;
+    cv::Mat metrics_frame;
 
     while (true) {
         if (interlock->state() == InterlockState::FAULT) {
@@ -3737,8 +3835,21 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         }
         drawStatusDashboard(status_frame, live_ui);
 
+        const int metrics_height = std::max(frameHeight(camera_frame), 560);
+        if (metrics_frame.empty() || metrics_frame.rows != metrics_height ||
+            metrics_frame.cols != kLiveMetricsWidth) {
+            metrics_frame = cv::Mat(metrics_height,
+                                    kLiveMetricsWidth,
+                                    CV_8UC3,
+                                    cv::Scalar(245, 245, 245));
+        } else {
+            metrics_frame.setTo(cv::Scalar(245, 245, 245));
+        }
+        drawMetricsDashboard(metrics_frame, live_ui);
+
         cv::imshow(kLiveCameraWindowName, camera_frame);
         cv::imshow(kLiveStatusWindowName, status_frame);
+        cv::imshow(kLiveMetricsWindowName, metrics_frame);
         const int key = cv::waitKey(1);
         if (key == 27) {
             std::cout << "[LIVE_TEST] Exit requested from display window (esc)."
