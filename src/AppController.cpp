@@ -76,6 +76,7 @@ constexpr int kDemoGripStep = 45;
 constexpr std::chrono::milliseconds kCaptureRetryBackoff{50};
 constexpr std::chrono::milliseconds kDemoSlewStepInterval{100};
 constexpr int kDemoSlewStepDegrees = 1;
+constexpr int kLiveManualNudgeDegrees = 5;
 constexpr std::chrono::milliseconds kSurgeryRetractDwell{350};
 constexpr int kSurgeryForwardOffset = 22;
 constexpr int kSurgeryBackwardOffset = -22;
@@ -2275,7 +2276,8 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         << "[LIVE_TEST] Auto operator ack: "
         << (options.auto_ack ? "ON" : "OFF") << "\n"
         << "[LIVE_TEST] Physical button = single-button control\n"
-        << "[LIVE_TEST] Controls: space/button=single-button control, a/r/d=aliases, 0/1/2/3=select mode/routine, q=quit\n"
+        << "[LIVE_TEST] Controls: space/button=control, 0/1/2/3=mode/routine, esc=quit\n"
+        << "[LIVE_TEST] Manual mode keys: d/a(or q)=base left/right, w(or z)/s=forward/back, i/k=up/down, u/o=open/close\n"
         << "[LIVE_TEST] Starting in DISARMED setup mode\n"
         << "[LIVE_TEST] Guardian thresholds: freeze after "
         << kLiveFreezeBadFrameThreshold
@@ -2799,6 +2801,59 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         return true;
     };
 
+    auto requestManualNudge = [&](int delta_base,
+                                  int delta_lower,
+                                  int delta_upper,
+                                  int delta_grip,
+                                  const char* label) -> bool {
+        const LiveRoutineDefinition routine =
+            getLiveRoutineDefinition(selected_routine_index);
+        if (routine.auto_progress) {
+            return true;
+        }
+
+        if (!guardian_armed || !motion_gate_open || waiting_for_ack ||
+            freeze_command_pending ||
+            guardian->getState() != GuardianState::SAFE_MONITORING) {
+            std::cout << "[LIVE_TEST] manual nudge ignored: control not available"
+                      << std::endl;
+            return true;
+        }
+
+        if (!current_pose_offsets_known) {
+            current_pose_offsets = kSmokeHomePose;
+            current_pose_offsets_known = true;
+            pose_slew_target = current_pose_offsets;
+        }
+
+        SmokeJointOffsets target_offsets =
+            pose_slew_active ? pose_slew_target : current_pose_offsets;
+        target_offsets.base += delta_base;
+        target_offsets.lower += delta_lower;
+        target_offsets.upper += delta_upper;
+        target_offsets.grip += delta_grip;
+
+        bool clamped = false;
+        target_offsets = clampDemoOffsets(target_offsets, clamped);
+        pose_slew_target = target_offsets;
+        pose_slew_active =
+            (current_pose_offsets.base != pose_slew_target.base) ||
+            (current_pose_offsets.lower != pose_slew_target.lower) ||
+            (current_pose_offsets.upper != pose_slew_target.upper) ||
+            (current_pose_offsets.grip != pose_slew_target.grip);
+        next_pose_slew_due = std::chrono::steady_clock::now();
+        current_pose_name = "MANUAL";
+
+        if (pose_slew_active) {
+            std::cout << "[LIVE_TEST] manual " << label;
+            if (clamped) {
+                std::cout << " [clamped]";
+            }
+            std::cout << " [slew]" << std::endl;
+        }
+        return true;
+    };
+
     FrameEvent latest_frame_event;
     bool latest_frame_available = false;
     std::uint64_t frame_index = 0;
@@ -3162,39 +3217,82 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
 
         cv::imshow(kLiveWindowName, display_frame);
         const int key = cv::waitKey(1);
-        if (key == 'q' || key == 'Q') {
-            std::cout << "[LIVE_TEST] Exit requested from display window (q)." << std::endl;
+        if (key == 27) {
+            std::cout << "[LIVE_TEST] Exit requested from display window (esc)."
+                      << std::endl;
             break;
         }
 
-        if (key == ' ') {
-            if (!requestContinue()) {
-                break;
-            }
+        int normalized_key = key;
+        if (normalized_key >= 0 && normalized_key <= 255) {
+            normalized_key = std::tolower(normalized_key);
         }
 
-        if (key == 'r' || key == 'R') {
+        if (normalized_key == ' ') {
             if (!requestContinue()) {
-                break;
-            }
-        }
-
-        if (key == 'a' || key == 'A') {
-            if (!requestContinue()) {
-                break;
-            }
-        }
-
-        if (key == 'd' || key == 'D') {
-            if (!requestDisarm()) {
                 break;
             }
         }
 
         std::size_t requested_routine_index = 0;
-        if (liveRoutineIndexFromKey(key, requested_routine_index)) {
+        if (liveRoutineIndexFromKey(normalized_key, requested_routine_index)) {
             if (!selectRoutine(requested_routine_index)) {
                 break;
+            }
+        }
+
+        if (!getLiveRoutineDefinition(selected_routine_index).auto_progress) {
+            switch (normalized_key) {
+                case 'd':
+                    if (!requestManualNudge(-kLiveManualNudgeDegrees, 0, 0, 0,
+                                            "BASE LEFT")) {
+                        break;
+                    }
+                    break;
+                case 'a':
+                case 'q':
+                    if (!requestManualNudge(kLiveManualNudgeDegrees, 0, 0, 0,
+                                            "BASE RIGHT")) {
+                        break;
+                    }
+                    break;
+                case 'w':
+                case 'z':
+                    if (!requestManualNudge(0, 0, kLiveManualNudgeDegrees, 0,
+                                            "FORWARD")) {
+                        break;
+                    }
+                    break;
+                case 's':
+                    if (!requestManualNudge(0, 0, -kLiveManualNudgeDegrees, 0,
+                                            "BACKWARD")) {
+                        break;
+                    }
+                    break;
+                case 'i':
+                    if (!requestManualNudge(0, kLiveManualNudgeDegrees, 0, 0, "UP")) {
+                        break;
+                    }
+                    break;
+                case 'k':
+                    if (!requestManualNudge(0, -kLiveManualNudgeDegrees, 0, 0,
+                                            "DOWN")) {
+                        break;
+                    }
+                    break;
+                case 'u':
+                    if (!requestManualNudge(0, 0, 0, kLiveManualNudgeDegrees, "OPEN")) {
+                        break;
+                    }
+                    break;
+                case 'o':
+                    if (!requestManualNudge(0, 0, 0, -kLiveManualNudgeDegrees,
+                                            "CLOSE")) {
+                        break;
+                    }
+                    break;
+                default:
+                    break;
             }
         }
     }
