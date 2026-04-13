@@ -465,6 +465,12 @@ struct SupervisoryUiModel {
     std::string freeze_reason;
     std::string footer_info;
     RuntimeLatencyMetrics latency;
+    std::vector<double> vision_latency_history_us;
+    std::vector<double> unsafe_detect_history_ms;
+    std::vector<double> freeze_pipeline_history_ms;
+    std::vector<double> freeze_cmd_history_ms;
+    std::vector<double> total_stop_history_ms;
+    std::vector<double> ack_resume_history_ms;
     std::vector<SupervisoryUiRow> status_rows;
     bool show_focus = false;
     std::string focus_label;
@@ -511,6 +517,56 @@ void drawPanel(cv::Mat& frame,
                const cv::Scalar& border) {
     drawRectangle(frame, top_left, bottom_right, fill, -1);
     drawRectangle(frame, top_left, bottom_right, border, 1);
+}
+
+void drawSparkline(cv::Mat& frame,
+                   cv::Point top_left,
+                   cv::Point bottom_right,
+                   const std::vector<double>& samples,
+                   const cv::Scalar& line_color) {
+    const cv::Scalar panel_fill(235, 235, 235);
+    const cv::Scalar panel_border(220, 220, 220);
+    drawPanel(frame, top_left, bottom_right, panel_fill, panel_border);
+
+    const int inner_x1 = top_left.x + 2;
+    const int inner_y1 = top_left.y + 2;
+    const int inner_x2 = bottom_right.x - 2;
+    const int inner_y2 = bottom_right.y - 2;
+    if (inner_x2 <= inner_x1 || inner_y2 <= inner_y1 || samples.empty()) {
+        return;
+    }
+
+    double min_value = samples.front();
+    double max_value = samples.front();
+    for (double sample : samples) {
+        min_value = std::min(min_value, sample);
+        max_value = std::max(max_value, sample);
+    }
+    if (max_value - min_value < 1e-6) {
+        max_value = min_value + 1.0;
+    }
+
+    const int usable_width = std::max(1, inner_x2 - inner_x1);
+    const std::size_t count = samples.size();
+    for (std::size_t i = 1; i < count; ++i) {
+        const int x_prev = inner_x1 +
+                           static_cast<int>((usable_width * (i - 1)) /
+                                            std::max<std::size_t>(1, count - 1));
+        const int x_curr = inner_x1 +
+                           static_cast<int>((usable_width * i) /
+                                            std::max<std::size_t>(1, count - 1));
+        const double prev_norm = (samples[i - 1] - min_value) / (max_value - min_value);
+        const double curr_norm = (samples[i] - min_value) / (max_value - min_value);
+        const int y_prev = inner_y2 -
+                           static_cast<int>(prev_norm * (inner_y2 - inner_y1));
+        const int y_curr = inner_y2 -
+                           static_cast<int>(curr_norm * (inner_y2 - inner_y1));
+        drawLine(frame,
+                 cv::Point(x_prev, y_prev),
+                 cv::Point(x_curr, y_curr),
+                 line_color,
+                 1);
+    }
 }
 
 void drawSupervisoryGui(cv::Mat& frame, const SupervisoryUiModel& model) {
@@ -1172,24 +1228,27 @@ void drawStatusDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
                     1);
     });
 
-    if (model.freeze_reason != "NONE" && model.freeze_reason != "N/A") {
-        drawCard(56, cv::Scalar(60, 60, 200), [&](int x, int y0) {
-            cv::putText(frame,
-                        "FREEZE REASON",
-                        cv::Point(x + 10, y0 + 15),
-                        cv::FONT_HERSHEY_SIMPLEX,
-                        0.34,
-                        cv::Scalar(60, 60, 200),
-                        1);
-            cv::putText(frame,
-                        model.freeze_reason,
-                        cv::Point(x + 10, y0 + 40),
-                        uiPlainFontFace(),
-                        1.0,
-                        severityColor(model.freeze_reason),
-                        1);
-        });
-    }
+    const bool freeze_reason_active =
+        model.freeze_reason != "NONE" && model.freeze_reason != "N/A";
+    drawCard(56,
+             freeze_reason_active ? cv::Scalar(60, 60, 200) : panel_border,
+             [&](int x, int y0) {
+                 cv::putText(frame,
+                             "FREEZE REASON",
+                             cv::Point(x + 10, y0 + 15),
+                             cv::FONT_HERSHEY_SIMPLEX,
+                             0.34,
+                             freeze_reason_active ? cv::Scalar(60, 60, 200) : muted_text,
+                             1);
+                 cv::putText(frame,
+                             model.freeze_reason,
+                             cv::Point(x + 10, y0 + 40),
+                             uiPlainFontFace(),
+                             1.0,
+                             freeze_reason_active ? severityColor(model.freeze_reason)
+                                                  : muted_text,
+                             1);
+             });
 
     int rx = card_margin + 2;
     int ry = card_y + 12;
@@ -1262,49 +1321,51 @@ void drawStatusDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
 
     ry += 6;
     drawSectionTitle("LATENCY");
-    cv::putText(frame,
-                "vision_us " + std::to_string(model.latency.vision_us),
-                cv::Point(rx, ry),
-                uiPlainFontFace(),
-                1.0,
-                primary_text,
-                1);
-    ry += 16;
-    cv::putText(frame,
-                "unsafe_ms " +
-                    formatLatencyMilliseconds(model.latency.unsafe_detect_ms),
-                cv::Point(rx, ry),
-                uiPlainFontFace(),
-                1.0,
-                info_color,
-                1);
-    ry += 16;
-    cv::putText(frame,
-                "stop_ms " +
-                    formatLatencyMilliseconds(model.latency.total_stop_ms),
-                cv::Point(rx, ry),
-                uiPlainFontFace(),
-                1.0,
-                severityColor(formatLatencyMilliseconds(model.latency.total_stop_ms)),
-                1);
-    ry += 16;
-    cv::putText(frame,
-                "freeze_cmd_ms " +
-                    formatLatencyMilliseconds(model.latency.freeze_cmd_ms),
-                cv::Point(rx, ry),
-                uiPlainFontFace(),
-                1.0,
-                primary_text,
-                1);
-    ry += 16;
-    cv::putText(frame,
-                "ack_resume_ms " +
-                    formatLatencyMilliseconds(model.latency.ack_to_resume_ms),
-                cv::Point(rx, ry),
-                uiPlainFontFace(),
-                1.0,
-                primary_text,
-                1);
+    auto drawLatencyRow = [&](const std::string& label,
+                              const std::string& value,
+                              const std::vector<double>& history,
+                              const cv::Scalar& color) {
+        cv::putText(frame,
+                    label + " " + value,
+                    cv::Point(rx, ry),
+                    uiPlainFontFace(),
+                    0.95,
+                    color,
+                    1);
+        const int plot_top = ry + 4;
+        const int plot_bottom = ry + 20;
+        drawSparkline(frame,
+                      cv::Point(rx, plot_top),
+                      cv::Point(width - 20, plot_bottom),
+                      history,
+                      color);
+        ry += 28;
+    };
+
+    drawLatencyRow("vision_us",
+                   std::to_string(model.latency.vision_us),
+                   model.vision_latency_history_us,
+                   primary_text);
+    drawLatencyRow("unsafe_ms",
+                   formatLatencyMilliseconds(model.latency.unsafe_detect_ms),
+                   model.unsafe_detect_history_ms,
+                   info_color);
+    drawLatencyRow("freeze_pipeline_ms",
+                   formatLatencyMilliseconds(model.latency.freeze_pipeline_ms),
+                   model.freeze_pipeline_history_ms,
+                   cv::Scalar(90, 140, 220));
+    drawLatencyRow("freeze_cmd_ms",
+                   formatLatencyMilliseconds(model.latency.freeze_cmd_ms),
+                   model.freeze_cmd_history_ms,
+                   primary_text);
+    drawLatencyRow("stop_ms",
+                   formatLatencyMilliseconds(model.latency.total_stop_ms),
+                   model.total_stop_history_ms,
+                   severityColor(formatLatencyMilliseconds(model.latency.total_stop_ms)));
+    drawLatencyRow("ack_resume_ms",
+                   formatLatencyMilliseconds(model.latency.ack_to_resume_ms),
+                   model.ack_resume_history_ms,
+                   cv::Scalar(120, 100, 180));
 
     const cv::Scalar border_color =
         model.emphasise_danger ? cv::Scalar(60, 60, 200) : model.state_color;
@@ -2736,6 +2797,25 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
     CppTimerCallback live_step_timer;
     bool live_step_timer_started = false;
     RuntimeLatencyMetrics latency_metrics;
+    constexpr std::size_t kVisionHistoryLimit = 180;
+    constexpr std::size_t kEventHistoryLimit = 64;
+    std::deque<double> vision_us_history;
+    std::deque<double> unsafe_detect_history_ms;
+    std::deque<double> freeze_pipeline_history_ms;
+    std::deque<double> freeze_cmd_history_ms;
+    std::deque<double> total_stop_history_ms;
+    std::deque<double> ack_resume_history_ms;
+    auto appendHistorySample = [&](std::deque<double>& history,
+                                   double value,
+                                   std::size_t limit) {
+        history.push_back(value);
+        if (history.size() > limit) {
+            history.pop_front();
+        }
+    };
+    auto copyHistory = [&](const std::deque<double>& history) {
+        return std::vector<double>(history.begin(), history.end());
+    };
     std::optional<std::chrono::steady_clock::time_point>
         pending_unsafe_capture_timestamp;
     std::optional<std::chrono::steady_clock::time_point>
@@ -2923,6 +3003,10 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
                 latency_metrics.freeze_pipeline_ms = elapsedMilliseconds(
                     *pending_unsafe_decision_timestamp,
                     freeze_callback_start);
+                appendHistorySample(freeze_pipeline_history_ms,
+                                    static_cast<double>(
+                                        *latency_metrics.freeze_pipeline_ms),
+                                    kEventHistoryLimit);
             }
             stopLiveStepTimer();
             next_routine_step_index = 0;
@@ -2952,6 +3036,10 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
                 latency_metrics.ack_to_resume_ms = elapsedMilliseconds(
                     *ack_request_timestamp,
                     resume_callback_end);
+                appendHistorySample(ack_resume_history_ms,
+                                    static_cast<double>(
+                                        *latency_metrics.ack_to_resume_ms),
+                                    kEventHistoryLimit);
             }
             ack_request_timestamp.reset();
             if (interlock->state() == InterlockState::FAULT) {
@@ -2994,10 +3082,16 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         const auto freeze_cmd_end = std::chrono::steady_clock::now();
         latency_metrics.freeze_cmd_ms = elapsedMilliseconds(freeze_cmd_start,
                                                             freeze_cmd_end);
+        appendHistorySample(freeze_cmd_history_ms,
+                            static_cast<double>(*latency_metrics.freeze_cmd_ms),
+                            kEventHistoryLimit);
         if (pending_unsafe_capture_timestamp.has_value()) {
             latency_metrics.total_stop_ms = elapsedMilliseconds(
                 *pending_unsafe_capture_timestamp,
                 freeze_cmd_end);
+            appendHistorySample(total_stop_history_ms,
+                                static_cast<double>(*latency_metrics.total_stop_ms),
+                                kEventHistoryLimit);
         }
         pending_unsafe_capture_timestamp.reset();
         pending_unsafe_decision_timestamp.reset();
@@ -3308,6 +3402,9 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
                     latest_frame_event.image_data,
                     latest_frame_event.capture_timestamp);
                 latency_metrics.vision_us = result.processing_time.count();
+                appendHistorySample(vision_us_history,
+                                    static_cast<double>(latency_metrics.vision_us),
+                                    kVisionHistoryLimit);
                 focus_score = computeFocusScore(latest_frame_event.image_data);
                 focus_quality = focusQualityLabel(focus_score);
 
@@ -3335,6 +3432,11 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
                             latency_metrics.unsafe_detect_ms = elapsedMilliseconds(
                                 latest_frame_event.capture_timestamp,
                                 result.timestamp);
+                            appendHistorySample(unsafe_detect_history_ms,
+                                                static_cast<double>(
+                                                    *latency_metrics
+                                                         .unsafe_detect_ms),
+                                                kEventHistoryLimit);
                             logLiveLatencySample("unsafe_detect",
                                                  latency_metrics);
                         }
@@ -3574,6 +3676,13 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         live_ui.freeze_reason = freeze_reason_text;
         live_ui.footer_info = footer_info;
         live_ui.latency = latency_metrics;
+        live_ui.vision_latency_history_us = copyHistory(vision_us_history);
+        live_ui.unsafe_detect_history_ms = copyHistory(unsafe_detect_history_ms);
+        live_ui.freeze_pipeline_history_ms =
+            copyHistory(freeze_pipeline_history_ms);
+        live_ui.freeze_cmd_history_ms = copyHistory(freeze_cmd_history_ms);
+        live_ui.total_stop_history_ms = copyHistory(total_stop_history_ms);
+        live_ui.ack_resume_history_ms = copyHistory(ack_resume_history_ms);
         live_ui.status_rows = {
             {"Vision", safetyStateToString(current_vision_state),
              severityColor(safetyStateToString(current_vision_state))},
