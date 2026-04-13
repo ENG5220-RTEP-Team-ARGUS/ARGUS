@@ -99,8 +99,8 @@ set_mouse_azerty_keymap() {
 
 set_mouse_qwerty_keymap() {
     MOUSE_MODE=1
-    KEY_BASE_LEFT="a"
-    KEY_BASE_RIGHT="d"
+    KEY_BASE_LEFT="d"
+    KEY_BASE_RIGHT="a"
     KEY_UPPER_FORWARD="w"
     KEY_UPPER_BACKWARD="s"
     KEY_LOWER_UP=""
@@ -198,7 +198,7 @@ configure_keymap() {
         echo "[DRIVE]   1) azerty (d/q z/s i/k l/j)"
         echo "[DRIVE]   2) qwerty (d/a w/s i/k l/j)"
         echo "[DRIVE]   3) mouse-azerty (q/d z/s + mouse wheel/click)"
-        echo "[DRIVE]   4) mouse-qwerty (a/d w/s + mouse wheel/click)"
+        echo "[DRIVE]   4) mouse-qwerty (d/a w/s + mouse wheel/click)"
         echo "[DRIVE]   5) custom"
         read -rp "[DRIVE] choice [1/2/3/4/5] (default: 1): " choice
         choice="${choice:-1}"

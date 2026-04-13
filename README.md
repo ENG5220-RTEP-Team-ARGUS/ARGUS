@@ -378,7 +378,7 @@ Default keymap presets:
 - `azerty`: `d` / `q` base left/right, `z` / `s` upper forward/backward, `i` / `k` lower up/down, `l` / `j` grip open/close
 - `qwerty`: `a` rotate left (anti-clockwise), `d` rotate right (clockwise), `w` forward, `s` backward, `i` up, `k` down, `j` open, `l` close
 - `mouse-azerty`: `q` / `d` base left/right, `z` / `s` upper forward/backward, mouse wheel up/down = lower up/down, mouse left/right click = grip close/open
-- `mouse-qwerty`: `a` / `d` base left/right, `w` / `s` upper forward/backward, mouse wheel up/down = lower up/down, mouse left/right click = grip close/open
+- `mouse-qwerty`: `d` / `a` base left/right, `w` / `s` upper forward/backward, mouse wheel up/down = lower up/down, mouse left/right click = grip close/open
 - `h`: home (all joints to 0)
 - `r`: status
 - `+` / `-`: increase / decrease step size
