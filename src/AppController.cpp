@@ -1075,6 +1075,7 @@ struct LiveRoutineDefinition {
     const char* name;
     const DemoPoseStep* steps;
     std::size_t step_count;
+    bool auto_progress;
 };
 
 constexpr DemoPoseStep kDemoHomeStep{"HOME", kSmokeHomePose};
@@ -1113,34 +1114,42 @@ constexpr std::array<DemoPoseStep, 5> kLiveGripPulseSequence = {{
 LiveRoutineDefinition getLiveRoutineDefinition(std::size_t index) {
     switch (index) {
         case 1:
-            return {2,
-                    "BASE_SCAN",
-                    kLiveBaseScanSequence.data(),
-                    kLiveBaseScanSequence.size()};
-        case 2:
-            return {3,
-                    "GRIP_PULSE",
-                    kLiveGripPulseSequence.data(),
-                    kLiveGripPulseSequence.size()};
-        case 0:
-        default:
             return {1,
                     "SURGERY_CUT",
                     kLiveSurgeryCutSequence.data(),
-                    kLiveSurgeryCutSequence.size()};
+                    kLiveSurgeryCutSequence.size(),
+                    true};
+        case 2:
+            return {2,
+                    "BASE_SCAN",
+                    kLiveBaseScanSequence.data(),
+                    kLiveBaseScanSequence.size(),
+                    true};
+        case 3:
+            return {3,
+                    "GRIP_PULSE",
+                    kLiveGripPulseSequence.data(),
+                    kLiveGripPulseSequence.size(),
+                    true};
+        case 0:
+        default:
+            return {0, "MANUAL", nullptr, 0, false};
     }
 }
 
 bool liveRoutineIndexFromKey(int key, std::size_t& index) {
     switch (key) {
-        case '1':
+        case '0':
             index = 0;
             return true;
-        case '2':
+        case '1':
             index = 1;
             return true;
-        case '3':
+        case '2':
             index = 2;
+            return true;
+        case '3':
+            index = 3;
             return true;
         default:
             return false;
@@ -2266,14 +2275,14 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         << "[LIVE_TEST] Auto operator ack: "
         << (options.auto_ack ? "ON" : "OFF") << "\n"
         << "[LIVE_TEST] Physical button = single-button control\n"
-        << "[LIVE_TEST] Controls: space/button=single-button control, a/r/d=aliases, 1/2/3=select routine, q=quit\n"
+        << "[LIVE_TEST] Controls: space/button=single-button control, a/r/d=aliases, 0/1/2/3=select mode/routine, q=quit\n"
         << "[LIVE_TEST] Starting in DISARMED setup mode\n"
         << "[LIVE_TEST] Guardian thresholds: freeze after "
         << kLiveFreezeBadFrameThreshold
         << " consecutive bad frames, recover after "
         << kLiveRecoverGoodFrameThreshold
         << " consecutive good frames.\n"
-        << "[LIVE_TEST] Routines: 1=SURGERY_CUT, 2=BASE_SCAN, 3=GRIP_PULSE\n"
+        << "[LIVE_TEST] Modes: 0=MANUAL, 1=SURGERY_CUT, 2=BASE_SCAN, 3=GRIP_PULSE\n"
         << "[LIVE_TEST] Focus debug enabled: FOCUS_SCORE (Laplacian variance), "
            "higher usually means sharper marker edges.\n";
 
@@ -2315,7 +2324,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
     bool waiting_for_ack_announced = false;
     bool home_pose_staged = false;
     std::string current_pose_name = "HOME";
-    std::size_t selected_routine_index = 0;
+    std::size_t selected_routine_index = 1;
     std::size_t next_routine_step_index = 0;
     SmokeJointOffsets current_pose_offsets = kSmokeHomePose;
     bool current_pose_offsets_known = false;
@@ -2476,16 +2485,25 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
 
     auto selectRoutine = [&](std::size_t routine_index) -> bool {
         const LiveRoutineDefinition routine = getLiveRoutineDefinition(routine_index);
+        stopLiveStepTimer();
         selected_routine_index = routine_index;
         next_routine_step_index = 0;
         std::cout << "[LIVE_TEST] routine " << routine.number << " selected: "
                   << routine.name << std::endl;
 
         if (guardian_armed && motion_gate_open && frame_is_safe) {
-            if (!stagePose(kDemoHomeStep)) {
-                return false;
+            if (routine.auto_progress) {
+                if (!stagePose(kDemoHomeStep)) {
+                    return false;
+                }
+                home_pose_staged = true;
+                if (!startLiveStepTimer()) {
+                    return false;
+                }
+            } else {
+                std::cout << "[LIVE_TEST] manual mode active: auto routine paused."
+                          << std::endl;
             }
-            home_pose_staged = true;
         }
 
         return true;
@@ -2542,9 +2560,11 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
                 motion_faulted = true;
                 return;
             }
-            if (!startLiveStepTimer()) {
-                motion_faulted = true;
-                return;
+            if (getLiveRoutineDefinition(selected_routine_index).auto_progress) {
+                if (!startLiveStepTimer()) {
+                    motion_faulted = true;
+                    return;
+                }
             }
             motion_gate_open = true;
             std::cout << "[LIVE_TEST] resume" << std::endl;
@@ -2666,8 +2686,11 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
             return false;
         }
 
-        if (!startLiveStepTimer()) {
-            return false;
+        stopLiveStepTimer();
+        if (getLiveRoutineDefinition(selected_routine_index).auto_progress) {
+            if (!startLiveStepTimer()) {
+                return false;
+            }
         }
         guardian_armed = true;
         motion_gate_open = true;
@@ -2705,6 +2728,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         freeze_command_pending = false;
         freeze_command_due.reset();
         pose_slew_active = false;
+        stopLiveStepTimer();
         next_routine_step_index = 0;
         current_pose_name = "HOLD";
         resetEnforcementState();
@@ -2798,6 +2822,10 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
 
                 const LiveRoutineDefinition routine =
                     getLiveRoutineDefinition(selected_routine_index);
+                if (!routine.auto_progress || routine.steps == nullptr ||
+                    routine.step_count == 0) {
+                    return ControllerEventDisposition::Consumed;
+                }
                 const DemoPoseStep& step = routine.steps[next_routine_step_index];
                 if (!stagePose(step)) {
                     return ControllerEventDisposition::Abort;

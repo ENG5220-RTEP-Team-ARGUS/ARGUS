@@ -444,24 +444,24 @@ sudo -E ./build/ARGUS --button-test
 ./scripts/full_demo.sh --camera-index 0 --expected-marker-id 23
 ```
 
-Default routine (`FULL_SWEEP`) dance:
-- `BASE +45`
-- `BASE -45`
-- `HOME`
-- `LOWER +45`
-- `LOWER -45`
-- `HOME`
-- `UPPER +45`
-- `UPPER -45`
-- `HOME`
-- `GRIP +45`
-- `GRIP -45`
+Default armed routine (`SURGERY_CUT`):
+- `GRIP +90 (TOOL)`
+- `CUT P1 FORWARD`
+- `CUT P1 DOWN`
+- `CUT P1 BACKWARD`
+- `CUT P2 FORWARD`
+- `CUT P2 DOWN (DEEPER)`
+- `CUT P2 BACKWARD`
+- `CUT P3 FORWARD`
+- `CUT P3 DOWN (FAILURE PASS)`
+- `CUT P3 BACKWARD`
 - `HOME`
 
 Live-test controls:
 - `space`: single-button control
 - `a`, `r`, `d`: legacy aliases for the same control path
-- `1`: select routine 1 (`FULL_SWEEP`)
+- `0`: select mode 0 (`MANUAL`, no auto routine progression)
+- `1`: select routine 1 (`SURGERY_CUT`)
 - `2`: select routine 2 (`BASE_SCAN`)
 - `3`: select routine 3 (`GRIP_PULSE`)
 - `q`: quit
