@@ -32,7 +32,8 @@
 
 namespace {
 
-constexpr const char* kLiveWindowName = "ARGUS Live Test";
+constexpr const char* kLiveCameraWindowName = "ARGUS Live Camera";
+constexpr const char* kLiveStatusWindowName = "ARGUS Live Status";
 constexpr const char* kDefaultI2cDevicePath = "/dev/i2c-1";
 constexpr std::uint8_t kDefaultPca9685Address = 0x40;
 constexpr float kDefaultPwmFrequencyHz = 50.0f;
@@ -917,6 +918,401 @@ void drawSupervisoryGui(cv::Mat& frame, const SupervisoryUiModel& model) {
                   cv::Point(width - 3, height - 3),
                   border_color,
                   border_thickness);
+}
+
+void drawCameraOverlay(cv::Mat& frame, const SupervisoryUiModel& model) {
+    if (frame.empty()) {
+        return;
+    }
+
+    const int width = frameWidth(frame);
+    const int height = frameHeight(frame);
+    const cv::Scalar muted_text(120, 120, 120);
+    const cv::Scalar white(255, 255, 255);
+
+    cv::putText(frame,
+                model.camera_hud_text,
+                cv::Point(14, 24),
+                uiPlainFontFace(),
+                0.95,
+                model.camera_hud_color,
+                1);
+    if (model.show_focus) {
+        const std::string focus_text = "FOCUS " + model.focus_label;
+        const int focus_x = std::max(12, width - 290);
+        cv::putText(frame,
+                    focus_text,
+                    cv::Point(focus_x, 24),
+                    uiPlainFontFace(),
+                    0.9,
+                    model.focus_color,
+                    1);
+    }
+
+    cv::putText(frame,
+                model.camera_bottom_left,
+                cv::Point(12, height - 12),
+                uiPlainFontFace(),
+                0.8,
+                muted_text,
+                1);
+    cv::putText(frame,
+                model.camera_bottom_right,
+                cv::Point(std::max(12, width - 90), height - 12),
+                uiPlainFontFace(),
+                0.8,
+                muted_text,
+                1);
+
+    if (model.show_frozen_overlay) {
+        drawRectangle(frame,
+                      cv::Point(6, 6),
+                      cv::Point(width - 7, height - 7),
+                      cv::Scalar(60, 60, 200),
+                      3);
+        const int title_y = std::max(80, height / 3);
+        cv::putText(frame,
+                    model.frozen_overlay_title,
+                    cv::Point(24, title_y),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    1.1,
+                    cv::Scalar(60, 60, 200),
+                    3);
+        cv::putText(frame,
+                    model.frozen_overlay_subtitle,
+                    cv::Point(24, title_y + 34),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.55,
+                    cv::Scalar(60, 60, 200),
+                    1);
+    } else if (model.show_waiting_overlay) {
+        const int box_w = std::max(320, width - 120);
+        const int x1 = std::max(20, (width - box_w) / 2);
+        const int y1 = std::max(40, height - 74);
+        drawPanel(frame,
+                  cv::Point(x1, y1),
+                  cv::Point(x1 + box_w, y1 + 34),
+                  white,
+                  cv::Scalar(50, 180, 230));
+        cv::putText(frame,
+                    model.waiting_overlay_text,
+                    cv::Point(x1 + 10, y1 + 22),
+                    uiPlainFontFace(),
+                    0.85,
+                    cv::Scalar(50, 180, 230),
+                    1);
+    }
+
+    const cv::Scalar border_color =
+        model.emphasise_danger ? cv::Scalar(60, 60, 200) : model.state_color;
+    const int border_thickness = model.emphasise_danger ? 4 : 2;
+    drawRectangle(frame,
+                  cv::Point(2, 2),
+                  cv::Point(width - 3, height - 3),
+                  border_color,
+                  border_thickness);
+}
+
+void drawStatusDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
+    if (frame.empty()) {
+        return;
+    }
+
+    const int width = frameWidth(frame);
+    const int height = frameHeight(frame);
+    const int header_height = 52;
+    const int state_bar_height = 32;
+    const int body_top = header_height + state_bar_height + 8;
+    const cv::Scalar panel_fill(245, 245, 245);
+    const cv::Scalar panel_border(220, 220, 220);
+    const cv::Scalar primary_text(25, 25, 25);
+    const cv::Scalar muted_text(120, 120, 120);
+    const cv::Scalar info_color(170, 140, 60);
+    const cv::Scalar white(255, 255, 255);
+
+    frame.setTo(panel_fill);
+    drawPanel(frame,
+              cv::Point(0, 0),
+              cv::Point(width - 1, header_height),
+              panel_fill,
+              panel_border);
+    drawPanel(frame,
+              cv::Point(0, header_height),
+              cv::Point(width - 1, header_height + state_bar_height),
+              panel_fill,
+              panel_border);
+
+    drawPanel(frame,
+              cv::Point(10, 8),
+              cv::Point(38, 34),
+              panel_fill,
+              model.state_color);
+    cv::putText(frame,
+                "A",
+                cv::Point(20, 27),
+                cv::FONT_HERSHEY_SIMPLEX,
+                0.6,
+                primary_text,
+                2);
+
+    cv::putText(frame,
+                "ARGUS",
+                cv::Point(50, 23),
+                cv::FONT_HERSHEY_SIMPLEX,
+                0.55,
+                primary_text,
+                2);
+    cv::putText(frame,
+                "Safety Supervisor",
+                cv::Point(50, 38),
+                cv::FONT_HERSHEY_SIMPLEX,
+                0.35,
+                muted_text,
+                1);
+    cv::putText(frame,
+                model.mode_title,
+                cv::Point(width - 124, 31),
+                uiPlainFontFace(),
+                0.9,
+                primary_text,
+                1);
+
+    cv::putText(frame,
+                model.state_label,
+                cv::Point(12, header_height + 22),
+                uiPlainFontFace(),
+                1.0,
+                model.state_color,
+                1);
+    cv::putText(frame,
+                model.state_description,
+                cv::Point(92, header_height + 22),
+                cv::FONT_HERSHEY_SIMPLEX,
+                0.36,
+                muted_text,
+                1);
+    cv::putText(frame,
+                "Operator -> " + model.operator_prompt,
+                cv::Point(12, header_height + 34),
+                cv::FONT_HERSHEY_SIMPLEX,
+                0.32,
+                model.state_color,
+                1);
+
+    const int card_margin = 12;
+    const int card_width = width - (2 * card_margin);
+    int card_y = body_top;
+    auto drawCard = [&](int height_px,
+                        const cv::Scalar& border_color,
+                        const auto& painter) {
+        drawPanel(frame,
+                  cv::Point(card_margin, card_y),
+                  cv::Point(card_margin + card_width, card_y + height_px),
+                  white,
+                  border_color);
+        painter(card_margin, card_y);
+        card_y += height_px + 8;
+    };
+
+    drawCard(76, model.state_color, [&](int x, int y0) {
+        cv::putText(frame,
+                    "SAFETY STATE",
+                    cv::Point(x + 10, y0 + 15),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.34,
+                    muted_text,
+                    1);
+        cv::putText(frame,
+                    model.state_label,
+                    cv::Point(x + 10, y0 + 44),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.8,
+                    model.state_color,
+                    2);
+        cv::putText(frame,
+                    model.state_description,
+                    cv::Point(x + 10, y0 + 62),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.34,
+                    primary_text,
+                    1);
+    });
+
+    drawCard(56, model.motion_color, [&](int x, int y0) {
+        cv::putText(frame,
+                    "MOTION GATE",
+                    cv::Point(x + 10, y0 + 15),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.34,
+                    muted_text,
+                    1);
+        cv::putText(frame,
+                    std::string("MOTION ") + model.motion_label,
+                    cv::Point(x + 10, y0 + 40),
+                    uiPlainFontFace(),
+                    1.0,
+                    model.motion_color,
+                    1);
+    });
+
+    drawCard(56, panel_border, [&](int x, int y0) {
+        cv::putText(frame,
+                    "NEXT ACTION",
+                    cv::Point(x + 10, y0 + 15),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.34,
+                    muted_text,
+                    1);
+        cv::putText(frame,
+                    model.next_action,
+                    cv::Point(x + 10, y0 + 40),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.4,
+                    primary_text,
+                    1);
+    });
+
+    if (model.freeze_reason != "NONE" && model.freeze_reason != "N/A") {
+        drawCard(56, cv::Scalar(60, 60, 200), [&](int x, int y0) {
+            cv::putText(frame,
+                        "FREEZE REASON",
+                        cv::Point(x + 10, y0 + 15),
+                        cv::FONT_HERSHEY_SIMPLEX,
+                        0.34,
+                        cv::Scalar(60, 60, 200),
+                        1);
+            cv::putText(frame,
+                        model.freeze_reason,
+                        cv::Point(x + 10, y0 + 40),
+                        uiPlainFontFace(),
+                        1.0,
+                        severityColor(model.freeze_reason),
+                        1);
+        });
+    }
+
+    int rx = card_margin + 2;
+    int ry = card_y + 12;
+    auto drawSectionTitle = [&](const std::string& title) {
+        cv::putText(frame,
+                    title,
+                    cv::Point(rx, ry),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.34,
+                    muted_text,
+                    1);
+        ry += 8;
+        drawLine(frame,
+                 cv::Point(card_margin, ry),
+                 cv::Point(width - card_margin, ry),
+                 panel_border,
+                 1);
+        ry += 14;
+    };
+
+    drawSectionTitle("SUBSYSTEMS");
+    for (const auto& row : model.status_rows) {
+        cv::putText(frame,
+                    row.label,
+                    cv::Point(rx, ry),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.4,
+                    muted_text,
+                    1);
+        ry += 14;
+        cv::putText(frame,
+                    row.value,
+                    cv::Point(rx, ry),
+                    uiPlainFontFace(),
+                    1.0,
+                    row.value_color,
+                    1);
+        ry += 14;
+    }
+
+    if (model.show_focus) {
+        ry += 6;
+        drawSectionTitle("FOCUS");
+        drawPanel(frame,
+                  cv::Point(rx, ry),
+                  cv::Point(width - 20, ry + 16),
+                  cv::Scalar(235, 235, 235),
+                  panel_border);
+        const int bar_width = std::max(
+            0,
+            static_cast<int>((width - rx - 22) *
+                             std::clamp(model.focus_fraction, 0.0, 1.0)));
+        if (bar_width > 0) {
+            drawRectangle(frame,
+                          cv::Point(rx + 1, ry + 1),
+                          cv::Point(rx + bar_width, ry + 15),
+                          model.focus_color,
+                          -1);
+        }
+        ry += 30;
+        cv::putText(frame,
+                    model.focus_label,
+                    cv::Point(rx, ry),
+                    uiPlainFontFace(),
+                    1.0,
+                    model.focus_color,
+                    1);
+        ry += 16;
+    }
+
+    ry += 6;
+    drawSectionTitle("LATENCY");
+    cv::putText(frame,
+                "vision_us " + std::to_string(model.latency.vision_us),
+                cv::Point(rx, ry),
+                uiPlainFontFace(),
+                1.0,
+                primary_text,
+                1);
+    ry += 16;
+    cv::putText(frame,
+                "unsafe_ms " +
+                    formatLatencyMilliseconds(model.latency.unsafe_detect_ms),
+                cv::Point(rx, ry),
+                uiPlainFontFace(),
+                1.0,
+                info_color,
+                1);
+    ry += 16;
+    cv::putText(frame,
+                "stop_ms " +
+                    formatLatencyMilliseconds(model.latency.total_stop_ms),
+                cv::Point(rx, ry),
+                uiPlainFontFace(),
+                1.0,
+                severityColor(formatLatencyMilliseconds(model.latency.total_stop_ms)),
+                1);
+    ry += 16;
+    cv::putText(frame,
+                "freeze_cmd_ms " +
+                    formatLatencyMilliseconds(model.latency.freeze_cmd_ms),
+                cv::Point(rx, ry),
+                uiPlainFontFace(),
+                1.0,
+                primary_text,
+                1);
+    ry += 16;
+    cv::putText(frame,
+                "ack_resume_ms " +
+                    formatLatencyMilliseconds(model.latency.ack_to_resume_ms),
+                cv::Point(rx, ry),
+                uiPlainFontFace(),
+                1.0,
+                primary_text,
+                1);
+
+    const cv::Scalar border_color =
+        model.emphasise_danger ? cv::Scalar(60, 60, 200) : model.state_color;
+    drawRectangle(frame,
+                  cv::Point(2, 2),
+                  cv::Point(width - 3, height - 3),
+                  border_color,
+                  model.emphasise_danger ? 4 : 2);
 }
 
 const char* safetyStateToString(SafetyState state) {
@@ -2975,7 +3371,8 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         return ControllerEventDisposition::Consumed;
     };
 
-    cv::namedWindow(kLiveWindowName, cv::WINDOW_AUTOSIZE);
+    cv::namedWindow(kLiveCameraWindowName, cv::WINDOW_AUTOSIZE);
+    cv::namedWindow(kLiveStatusWindowName, cv::WINDOW_AUTOSIZE);
 
     struct LiveStatusSnapshot {
         bool guardian_armed = false;
@@ -3043,6 +3440,9 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
             }
         }
     });
+
+    constexpr int kLiveStatusWidth = 430;
+    cv::Mat status_frame;
 
     while (true) {
         if (interlock->state() == InterlockState::FAULT) {
@@ -3213,9 +3613,23 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         live_ui.emphasise_danger =
             guardian_armed && guardian->getState() == GuardianState::FROZEN_UNSAFE;
 
-        drawSupervisoryGui(display_frame, live_ui);
+        cv::Mat camera_frame = display_frame.clone();
+        drawCameraOverlay(camera_frame, live_ui);
 
-        cv::imshow(kLiveWindowName, display_frame);
+        const int status_height = std::max(frameHeight(camera_frame), 720);
+        if (status_frame.empty() || status_frame.rows != status_height ||
+            status_frame.cols != kLiveStatusWidth) {
+            status_frame = cv::Mat(status_height,
+                                   kLiveStatusWidth,
+                                   CV_8UC3,
+                                   cv::Scalar(245, 245, 245));
+        } else {
+            status_frame.setTo(cv::Scalar(245, 245, 245));
+        }
+        drawStatusDashboard(status_frame, live_ui);
+
+        cv::imshow(kLiveCameraWindowName, camera_frame);
+        cv::imshow(kLiveStatusWindowName, status_frame);
         const int key = cv::waitKey(1);
         if (key == 27) {
             std::cout << "[LIVE_TEST] Exit requested from display window (esc)."
@@ -3300,7 +3714,8 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         capture_thread.join();
     }
 
-    cv::destroyWindow(kLiveWindowName);
+    cv::destroyWindow(kLiveCameraWindowName);
+    cv::destroyWindow(kLiveStatusWindowName);
     stopLiveStepTimer();
     motion_controller_.shutdown();
 
