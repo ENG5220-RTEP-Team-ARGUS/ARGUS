@@ -76,6 +76,7 @@ constexpr int kDemoGripStep = 45;
 constexpr std::chrono::milliseconds kCaptureRetryBackoff{50};
 constexpr std::chrono::milliseconds kDemoSlewStepInterval{100};
 constexpr int kDemoSlewStepDegrees = 1;
+constexpr int kLiveManualNudgeDegrees = 5;
 constexpr std::chrono::milliseconds kSurgeryRetractDwell{350};
 constexpr int kSurgeryForwardOffset = 22;
 constexpr int kSurgeryBackwardOffset = -22;
@@ -1075,6 +1076,7 @@ struct LiveRoutineDefinition {
     const char* name;
     const DemoPoseStep* steps;
     std::size_t step_count;
+    bool auto_progress;
 };
 
 constexpr DemoPoseStep kDemoHomeStep{"HOME", kSmokeHomePose};
@@ -1113,34 +1115,42 @@ constexpr std::array<DemoPoseStep, 5> kLiveGripPulseSequence = {{
 LiveRoutineDefinition getLiveRoutineDefinition(std::size_t index) {
     switch (index) {
         case 1:
-            return {2,
-                    "BASE_SCAN",
-                    kLiveBaseScanSequence.data(),
-                    kLiveBaseScanSequence.size()};
-        case 2:
-            return {3,
-                    "GRIP_PULSE",
-                    kLiveGripPulseSequence.data(),
-                    kLiveGripPulseSequence.size()};
-        case 0:
-        default:
             return {1,
                     "SURGERY_CUT",
                     kLiveSurgeryCutSequence.data(),
-                    kLiveSurgeryCutSequence.size()};
+                    kLiveSurgeryCutSequence.size(),
+                    true};
+        case 2:
+            return {2,
+                    "BASE_SCAN",
+                    kLiveBaseScanSequence.data(),
+                    kLiveBaseScanSequence.size(),
+                    true};
+        case 3:
+            return {3,
+                    "GRIP_PULSE",
+                    kLiveGripPulseSequence.data(),
+                    kLiveGripPulseSequence.size(),
+                    true};
+        case 0:
+        default:
+            return {0, "MANUAL", nullptr, 0, false};
     }
 }
 
 bool liveRoutineIndexFromKey(int key, std::size_t& index) {
     switch (key) {
-        case '1':
+        case '0':
             index = 0;
             return true;
-        case '2':
+        case '1':
             index = 1;
             return true;
-        case '3':
+        case '2':
             index = 2;
+            return true;
+        case '3':
+            index = 3;
             return true;
         default:
             return false;
@@ -2266,14 +2276,15 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         << "[LIVE_TEST] Auto operator ack: "
         << (options.auto_ack ? "ON" : "OFF") << "\n"
         << "[LIVE_TEST] Physical button = single-button control\n"
-        << "[LIVE_TEST] Controls: space/button=single-button control, a/r/d=aliases, 1/2/3=select routine, q=quit\n"
+        << "[LIVE_TEST] Controls: space/button=control, 0/1/2/3=mode/routine, esc=quit\n"
+        << "[LIVE_TEST] Manual mode keys: d/a=base left/right, w/s=forward/back, i/k=up/down, l/j=open/close\n"
         << "[LIVE_TEST] Starting in DISARMED setup mode\n"
         << "[LIVE_TEST] Guardian thresholds: freeze after "
         << kLiveFreezeBadFrameThreshold
         << " consecutive bad frames, recover after "
         << kLiveRecoverGoodFrameThreshold
         << " consecutive good frames.\n"
-        << "[LIVE_TEST] Routines: 1=SURGERY_CUT, 2=BASE_SCAN, 3=GRIP_PULSE\n"
+        << "[LIVE_TEST] Modes: 0=MANUAL, 1=SURGERY_CUT, 2=BASE_SCAN, 3=GRIP_PULSE\n"
         << "[LIVE_TEST] Focus debug enabled: FOCUS_SCORE (Laplacian variance), "
            "higher usually means sharper marker edges.\n";
 
@@ -2315,7 +2326,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
     bool waiting_for_ack_announced = false;
     bool home_pose_staged = false;
     std::string current_pose_name = "HOME";
-    std::size_t selected_routine_index = 0;
+    std::size_t selected_routine_index = 1;
     std::size_t next_routine_step_index = 0;
     SmokeJointOffsets current_pose_offsets = kSmokeHomePose;
     bool current_pose_offsets_known = false;
@@ -2476,16 +2487,25 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
 
     auto selectRoutine = [&](std::size_t routine_index) -> bool {
         const LiveRoutineDefinition routine = getLiveRoutineDefinition(routine_index);
+        stopLiveStepTimer();
         selected_routine_index = routine_index;
         next_routine_step_index = 0;
         std::cout << "[LIVE_TEST] routine " << routine.number << " selected: "
                   << routine.name << std::endl;
 
         if (guardian_armed && motion_gate_open && frame_is_safe) {
-            if (!stagePose(kDemoHomeStep)) {
-                return false;
+            if (routine.auto_progress) {
+                if (!stagePose(kDemoHomeStep)) {
+                    return false;
+                }
+                home_pose_staged = true;
+                if (!startLiveStepTimer()) {
+                    return false;
+                }
+            } else {
+                std::cout << "[LIVE_TEST] manual mode active: auto routine paused."
+                          << std::endl;
             }
-            home_pose_staged = true;
         }
 
         return true;
@@ -2542,9 +2562,11 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
                 motion_faulted = true;
                 return;
             }
-            if (!startLiveStepTimer()) {
-                motion_faulted = true;
-                return;
+            if (getLiveRoutineDefinition(selected_routine_index).auto_progress) {
+                if (!startLiveStepTimer()) {
+                    motion_faulted = true;
+                    return;
+                }
             }
             motion_gate_open = true;
             std::cout << "[LIVE_TEST] resume" << std::endl;
@@ -2666,8 +2688,11 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
             return false;
         }
 
-        if (!startLiveStepTimer()) {
-            return false;
+        stopLiveStepTimer();
+        if (getLiveRoutineDefinition(selected_routine_index).auto_progress) {
+            if (!startLiveStepTimer()) {
+                return false;
+            }
         }
         guardian_armed = true;
         motion_gate_open = true;
@@ -2705,6 +2730,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         freeze_command_pending = false;
         freeze_command_due.reset();
         pose_slew_active = false;
+        stopLiveStepTimer();
         next_routine_step_index = 0;
         current_pose_name = "HOLD";
         resetEnforcementState();
@@ -2775,6 +2801,59 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         return true;
     };
 
+    auto requestManualNudge = [&](int delta_base,
+                                  int delta_lower,
+                                  int delta_upper,
+                                  int delta_grip,
+                                  const char* label) -> bool {
+        const LiveRoutineDefinition routine =
+            getLiveRoutineDefinition(selected_routine_index);
+        if (routine.auto_progress) {
+            return true;
+        }
+
+        if (!guardian_armed || !motion_gate_open || waiting_for_ack ||
+            freeze_command_pending ||
+            guardian->getState() != GuardianState::SAFE_MONITORING) {
+            std::cout << "[LIVE_TEST] manual nudge ignored: control not available"
+                      << std::endl;
+            return true;
+        }
+
+        if (!current_pose_offsets_known) {
+            current_pose_offsets = kSmokeHomePose;
+            current_pose_offsets_known = true;
+            pose_slew_target = current_pose_offsets;
+        }
+
+        SmokeJointOffsets target_offsets =
+            pose_slew_active ? pose_slew_target : current_pose_offsets;
+        target_offsets.base += delta_base;
+        target_offsets.lower += delta_lower;
+        target_offsets.upper += delta_upper;
+        target_offsets.grip += delta_grip;
+
+        bool clamped = false;
+        target_offsets = clampDemoOffsets(target_offsets, clamped);
+        pose_slew_target = target_offsets;
+        pose_slew_active =
+            (current_pose_offsets.base != pose_slew_target.base) ||
+            (current_pose_offsets.lower != pose_slew_target.lower) ||
+            (current_pose_offsets.upper != pose_slew_target.upper) ||
+            (current_pose_offsets.grip != pose_slew_target.grip);
+        next_pose_slew_due = std::chrono::steady_clock::now();
+        current_pose_name = "MANUAL";
+
+        if (pose_slew_active) {
+            std::cout << "[LIVE_TEST] manual " << label;
+            if (clamped) {
+                std::cout << " [clamped]";
+            }
+            std::cout << " [slew]" << std::endl;
+        }
+        return true;
+    };
+
     FrameEvent latest_frame_event;
     bool latest_frame_available = false;
     std::uint64_t frame_index = 0;
@@ -2798,6 +2877,10 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
 
                 const LiveRoutineDefinition routine =
                     getLiveRoutineDefinition(selected_routine_index);
+                if (!routine.auto_progress || routine.steps == nullptr ||
+                    routine.step_count == 0) {
+                    return ControllerEventDisposition::Consumed;
+                }
                 const DemoPoseStep& step = routine.steps[next_routine_step_index];
                 if (!stagePose(step)) {
                     return ControllerEventDisposition::Abort;
@@ -3134,39 +3217,80 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
 
         cv::imshow(kLiveWindowName, display_frame);
         const int key = cv::waitKey(1);
-        if (key == 'q' || key == 'Q') {
-            std::cout << "[LIVE_TEST] Exit requested from display window (q)." << std::endl;
+        if (key == 27) {
+            std::cout << "[LIVE_TEST] Exit requested from display window (esc)."
+                      << std::endl;
             break;
         }
 
-        if (key == ' ') {
-            if (!requestContinue()) {
-                break;
-            }
+        int normalized_key = key;
+        if (normalized_key >= 0 && normalized_key <= 255) {
+            normalized_key = std::tolower(normalized_key);
         }
 
-        if (key == 'r' || key == 'R') {
+        if (normalized_key == ' ') {
             if (!requestContinue()) {
-                break;
-            }
-        }
-
-        if (key == 'a' || key == 'A') {
-            if (!requestContinue()) {
-                break;
-            }
-        }
-
-        if (key == 'd' || key == 'D') {
-            if (!requestDisarm()) {
                 break;
             }
         }
 
         std::size_t requested_routine_index = 0;
-        if (liveRoutineIndexFromKey(key, requested_routine_index)) {
+        if (liveRoutineIndexFromKey(normalized_key, requested_routine_index)) {
             if (!selectRoutine(requested_routine_index)) {
                 break;
+            }
+        }
+
+        if (!getLiveRoutineDefinition(selected_routine_index).auto_progress) {
+            switch (normalized_key) {
+                case 'd':
+                    if (!requestManualNudge(-kLiveManualNudgeDegrees, 0, 0, 0,
+                                            "BASE LEFT")) {
+                        break;
+                    }
+                    break;
+                case 'a':
+                    if (!requestManualNudge(kLiveManualNudgeDegrees, 0, 0, 0,
+                                            "BASE RIGHT")) {
+                        break;
+                    }
+                    break;
+                case 'w':
+                    if (!requestManualNudge(0, 0, kLiveManualNudgeDegrees, 0,
+                                            "FORWARD")) {
+                        break;
+                    }
+                    break;
+                case 's':
+                    if (!requestManualNudge(0, 0, -kLiveManualNudgeDegrees, 0,
+                                            "BACKWARD")) {
+                        break;
+                    }
+                    break;
+                case 'i':
+                    if (!requestManualNudge(0, kLiveManualNudgeDegrees, 0, 0, "UP")) {
+                        break;
+                    }
+                    break;
+                case 'k':
+                    if (!requestManualNudge(0, -kLiveManualNudgeDegrees, 0, 0,
+                                            "DOWN")) {
+                        break;
+                    }
+                    break;
+                case 'l':
+                    if (!requestManualNudge(0, 0, 0, kLiveManualNudgeDegrees, "OPEN")) {
+                        break;
+                    }
+                    break;
+                case 'j':
+                    if (!requestManualNudge(0, 0, 0, -kLiveManualNudgeDegrees,
+                                            "CLOSE")) {
+                        break;
+                    }
+                    break;
+                default:
+                    break;
             }
         }
     }

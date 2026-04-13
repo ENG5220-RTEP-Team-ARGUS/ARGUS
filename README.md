@@ -377,18 +377,20 @@ Runs a key-driven teleop wrapper on top of `--servo-console` so you can nudge jo
 Default keymap presets:
 - `azerty`: `d` / `q` base left/right, `z` / `s` upper forward/backward, `i` / `k` lower up/down, `l` / `j` grip open/close
 - `qwerty`: `a` rotate left (anti-clockwise), `d` rotate right (clockwise), `w` forward, `s` backward, `i` up, `k` down, `j` open, `l` close
+- `mouse-azerty`: `d` / `q` base left/right, `z` / `s` upper forward/backward, mouse wheel up/down = lower up/down, mouse left/right click = grip open/close
+- `mouse-qwerty`: `d` / `a` base left/right, `w` / `s` upper forward/backward, mouse wheel up/down = lower up/down, mouse left/right click = grip open/close
 - `h`: home (all joints to 0)
 - `r`: status
 - `+` / `-`: increase / decrease step size
 - `x`: go home, wait briefly, then exit
 
 Notes:
-- startup asks for keymap preset (`azerty`, `qwerty`, or `custom`)
+- startup asks for keymap preset (`azerty`, `qwerty`, `mouse-azerty`, `mouse-qwerty`, or `custom`)
 - `custom` asks one binding at a time
 - default step is `5` logical degrees
 - override step with `ARGUS_SERVO_STEP` (for example `ARGUS_SERVO_STEP=2 ./scripts/servo_drive.sh`)
 - default exit-home wait is `1.0s`; override with `ARGUS_SERVO_EXIT_HOME_WAIT_S`
-- skip startup prompt with `ARGUS_SERVO_KEYMAP=azerty` or `ARGUS_SERVO_KEYMAP=qwerty`
+- skip startup prompt with `ARGUS_SERVO_KEYMAP=azerty`, `ARGUS_SERVO_KEYMAP=qwerty`, `ARGUS_SERVO_KEYMAP=mouse-azerty`, or `ARGUS_SERVO_KEYMAP=mouse-qwerty`
 - logical range is clamped to `-90..+90`
 
 #### 8) Servo calibration console
@@ -442,24 +444,24 @@ sudo -E ./build/ARGUS --button-test
 ./scripts/full_demo.sh --camera-index 0 --expected-marker-id 23
 ```
 
-Default routine (`FULL_SWEEP`) dance:
-- `BASE +45`
-- `BASE -45`
-- `HOME`
-- `LOWER +45`
-- `LOWER -45`
-- `HOME`
-- `UPPER +45`
-- `UPPER -45`
-- `HOME`
-- `GRIP +45`
-- `GRIP -45`
+Default armed routine (`SURGERY_CUT`):
+- `GRIP +90 (TOOL)`
+- `CUT P1 FORWARD`
+- `CUT P1 DOWN`
+- `CUT P1 BACKWARD`
+- `CUT P2 FORWARD`
+- `CUT P2 DOWN (DEEPER)`
+- `CUT P2 BACKWARD`
+- `CUT P3 FORWARD`
+- `CUT P3 DOWN (FAILURE PASS)`
+- `CUT P3 BACKWARD`
 - `HOME`
 
 Live-test controls:
 - `space`: single-button control
 - `a`, `r`, `d`: legacy aliases for the same control path
-- `1`: select routine 1 (`FULL_SWEEP`)
+- `0`: select mode 0 (`MANUAL`, no auto routine progression)
+- `1`: select routine 1 (`SURGERY_CUT`)
 - `2`: select routine 2 (`BASE_SCAN`)
 - `3`: select routine 3 (`GRIP_PULSE`)
 - `q`: quit
