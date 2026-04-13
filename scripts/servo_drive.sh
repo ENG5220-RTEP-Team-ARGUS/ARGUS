@@ -87,8 +87,8 @@ set_azerty_keymap() {
 
 set_mouse_azerty_keymap() {
     MOUSE_MODE=1
-    KEY_BASE_LEFT="q"
-    KEY_BASE_RIGHT="d"
+    KEY_BASE_LEFT="d"
+    KEY_BASE_RIGHT="q"
     KEY_UPPER_FORWARD="z"
     KEY_UPPER_BACKWARD="s"
     KEY_LOWER_UP=""
@@ -181,7 +181,7 @@ print_keymap() {
     echo "[DRIVE]   $KEY_UPPER_FORWARD/$KEY_UPPER_BACKWARD = upper forward/back"
     if (( MOUSE_MODE )); then
         echo "[DRIVE]   mouse wheel up/down = lower up/down"
-        echo "[DRIVE]   mouse left/right click = grip close/open"
+        echo "[DRIVE]   mouse left/right click = grip open/close"
     else
         echo "[DRIVE]   $KEY_LOWER_UP/$KEY_LOWER_DOWN = lower up/down"
         echo "[DRIVE]   $KEY_GRIP_OPEN/$KEY_GRIP_CLOSE = grip open/close"
@@ -197,7 +197,7 @@ configure_keymap() {
         echo "[DRIVE] Select keymap preset:"
         echo "[DRIVE]   1) azerty (d/q z/s i/k l/j)"
         echo "[DRIVE]   2) qwerty (d/a w/s i/k l/j)"
-        echo "[DRIVE]   3) mouse-azerty (q/d z/s + mouse wheel/click)"
+        echo "[DRIVE]   3) mouse-azerty (d/q z/s + mouse wheel/click)"
         echo "[DRIVE]   4) mouse-qwerty (d/a w/s + mouse wheel/click)"
         echo "[DRIVE]   5) custom"
         read -rp "[DRIVE] choice [1/2/3/4/5] (default: 1): " choice
@@ -307,13 +307,13 @@ handle_mouse_event() {
     fi
 
     case "$button_code" in
-        0) # left click: grip close
-            GRIP="$(clamp_deg "$((GRIP - STEP))")"
+        0) # left click: grip open
+            GRIP="$(clamp_deg "$((GRIP + STEP))")"
             send_cmd "grip $GRIP"
             print_status
             ;;
-        2) # right click: grip open
-            GRIP="$(clamp_deg "$((GRIP + STEP))")"
+        2) # right click: grip close
+            GRIP="$(clamp_deg "$((GRIP - STEP))")"
             send_cmd "grip $GRIP"
             print_status
             ;;
