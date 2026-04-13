@@ -2277,7 +2277,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         << (options.auto_ack ? "ON" : "OFF") << "\n"
         << "[LIVE_TEST] Physical button = single-button control\n"
         << "[LIVE_TEST] Controls: space/button=control, 0/1/2/3=mode/routine, esc=quit\n"
-        << "[LIVE_TEST] Manual mode keys: d/a(or q)=base left/right, w(or z)/s=forward/back, i/k=up/down, u/o=open/close\n"
+        << "[LIVE_TEST] Manual mode keys: d/a=base left/right, w/s=forward/back, i/k=up/down, l/j=open/close\n"
         << "[LIVE_TEST] Starting in DISARMED setup mode\n"
         << "[LIVE_TEST] Guardian thresholds: freeze after "
         << kLiveFreezeBadFrameThreshold
@@ -3250,14 +3250,12 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
                     }
                     break;
                 case 'a':
-                case 'q':
                     if (!requestManualNudge(kLiveManualNudgeDegrees, 0, 0, 0,
                                             "BASE RIGHT")) {
                         break;
                     }
                     break;
                 case 'w':
-                case 'z':
                     if (!requestManualNudge(0, 0, kLiveManualNudgeDegrees, 0,
                                             "FORWARD")) {
                         break;
@@ -3280,12 +3278,12 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
                         break;
                     }
                     break;
-                case 'u':
+                case 'l':
                     if (!requestManualNudge(0, 0, 0, kLiveManualNudgeDegrees, "OPEN")) {
                         break;
                     }
                     break;
-                case 'o':
+                case 'j':
                     if (!requestManualNudge(0, 0, 0, -kLiveManualNudgeDegrees,
                                             "CLOSE")) {
                         break;
