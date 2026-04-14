@@ -2,6 +2,7 @@
 
 #include <iostream>
 
+//Robot Interlock
 RobotInterlock::RobotInterlock(RobotHardware& hardware) noexcept
     : hardware_(hardware),
       state_(InterlockState::SAFE),
