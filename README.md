@@ -6,6 +6,7 @@
 
 ## Table of Contents
 - [Overview](#overview)
+- [Getting Started (Fresh Debian Trixie)](#getting-started-fresh-debian-trixie)
 - [Real-World Use Case](#real-world-use-case)
 - [System Architecture](#system-architecture)
 - [Bill of Materials (BOM)](#bill-of-materials-bom)
@@ -25,6 +26,62 @@
 - [Future Work](#future-work)
 
 ---
+
+## Getting Started (Fresh Debian Trixie)
+
+This is the canonical setup path to build ARGUS from a clean machine.
+
+### 1) Install packages
+```bash
+sudo apt update
+sudo apt install -y \
+  git \
+  build-essential \
+  cmake \
+  pkg-config \
+  libopencv-dev \
+  libopencv-contrib-dev \
+  libcamera-tools \
+  libcamera-dev \
+  libturbojpeg0-dev
+```
+
+### 2) Clone the repository
+```bash
+git clone --recursive https://github.com/ENG5220-RTEP-Team-ARGUS/ARGUS.git
+cd ARGUS
+```
+
+Contributor alternative (SSH):
+```bash
+git clone --recursive git@github.com:ENG5220-RTEP-Team-ARGUS/ARGUS.git
+cd ARGUS
+```
+
+### 3) Configure and build
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j"$(nproc)"
+```
+
+### 4) Quick runtime checks on Raspberry Pi
+Camera backend check:
+```bash
+./scripts/camera_backend_check.sh --camera-index 0
+```
+
+Live supervised run:
+```bash
+./scripts/live_test.sh --camera-index 0 --expected-marker-id 23
+```
+
+### Notes
+- `live_test.sh` self-elevates with `sudo` for GPIO button access.
+- If you intentionally do not want the bundled `libcamera2opencv` backend:
+  ```bash
+  cmake -S . -B build -DARGUS_ENABLE_LIBCAMERA2OPENCV=OFF
+  cmake --build build -j"$(nproc)"
+  ```
 
 ## Overview
 <p align="justify"> A.R.G.U.S (Adaptive Real-Time Guardian for Unsafe Situations) is a real-time, vision-based safety system for robotic manipulators, designed for high-risk environments such as surgical robotics and industrial automation. It continuously monitors the workspace - particularly during critical operations like instrument exchange - where unexpected motion can cause damage or injury. By analysing visual input under strict latency constraints, A.R.G.U.S. detects deviations from expected conditions and immediately triggers fail-safe interventions (e.g. hard stops) using event-driven control. This ensures deterministic, reliable interruption of motion, preventing accidents before they occur.</p>
@@ -138,30 +195,9 @@ The current branch validates that safety workflow on a small real arm using mark
 - pkg-config
 - libcamera runtime tools on the Pi
 
-### Install Dependencies
-```bash
-sudo apt update
-sudo apt install -y build-essential cmake pkg-config libopencv-dev libcamera-tools
-```
-
-### Current validated Raspberry Pi packages
-```bash
-sudo apt update
-sudo apt install -y build-essential cmake pkg-config libopencv-dev libcamera-tools
-```
-
-### Bundled Bernd compliance backend packages
-To build the bundled `libcamera2opencv` backend in this repo:
-```bash
-sudo apt install -y libcamera-dev libturbojpeg0-dev
-```
-
-Then configure and build ARGUS. The vendored backend will be compiled
-automatically when the dependencies are present:
-```bash
-cmake -S . -B build
-cmake --build build -j$(nproc)
-```
+### Canonical setup commands
+Use the exact commands from:
+- [Getting Started (Fresh Debian Trixie)](#getting-started-fresh-debian-trixie)
 
 ### Setup notes for this branch
 - use the wrapper scripts for Pi camera modes; they try the compliance backend
@@ -232,20 +268,11 @@ cmake --build build -j$(nproc)
 
 ## Building the Project
 
-```bash
-git clone https://github.com/YOUR_REPO.git --recursive
-cd ARGUS
-
-cmake .
-make
-```
-
-### Current validated build flow
-From repository root:
+Canonical build flow (repository root):
 
 ```bash
-cmake -S . -B build
-cmake --build build -j$(nproc)
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j"$(nproc)"
 ```
 
 If CMake fails with `Could not find OpenCVConfig.cmake`, install or configure the OpenCV development packages so `find_package(OpenCV REQUIRED)` succeeds.
@@ -253,10 +280,6 @@ If CMake fails with `Could not find OpenCVConfig.cmake`, install or configure th
 ---
 
 ## Running the System
-
-```bash
-./argus_main
-```
 
 ### Current validated run modes
 
@@ -483,9 +506,8 @@ GPIO overrides:
 
 ## Testing
 
-```bash
-make test
-```
+There is no required `make test` flow for this branch.
+Use the validated hardware/software checks listed below.
 
 ### Current validated test workflow
 1. Start in `DISARMED` mode.
