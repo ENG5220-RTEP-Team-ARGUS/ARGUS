@@ -278,11 +278,10 @@ SafetyResult VisionProcessor::process(
             //   mask1 - primary hue band: H in [depthHueLower1, depthHueUpper1]
             //   mask2 - optional second band: H in [depthHueLower2, depthHueUpper2]
             //
-            // For current black-layer detection, hue band 1 is configured to
-            // full range [0..179] and the decision is effectively controlled
-            // by S/V bounds (especially depthValMax). Setting depthHueLower2 >
-            // depthHueUpper2 in VisionConfig disables mask2 so bitwise_or
-            // reduces to mask1 with no code change required.
+            // For current green-layer detection, hue band 1 targets the green
+            // interval and mask2 is disabled by setting depthHueLower2 >
+            // depthHueUpper2 in VisionConfig, so bitwise_or reduces to mask1
+            // with no code change required.
             cv::Mat mask1, mask2, combinedMask;
 
             cv::inRange(
