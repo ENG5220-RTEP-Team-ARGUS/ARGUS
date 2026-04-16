@@ -72,11 +72,12 @@ Camera backend check:
 
 Live supervised run:
 ```bash
-./scripts/live_test.sh --camera-index 0 --expected-marker-id 23
+./scripts/live_test.sh --camera-index 0
 ```
 
 ### Notes
 - `live_test.sh` self-elevates with `sudo` for GPIO button access.
+- The quick live run uses the current color-based safety detection configuration.
 - If you intentionally do not want the bundled `libcamera2opencv` backend:
   ```bash
   cmake -S . -B build -DARGUS_ENABLE_LIBCAMERA2OPENCV=OFF
