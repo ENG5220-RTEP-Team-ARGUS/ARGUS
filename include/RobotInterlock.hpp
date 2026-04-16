@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstdint>
 
+/// @brief Freezes robot motion immediately upon safe condition 
 enum class ControlEvent {
     FREEZE_NOW,
     ALLOW_MOTION
