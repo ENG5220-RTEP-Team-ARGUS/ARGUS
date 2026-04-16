@@ -21,6 +21,7 @@ enum class FreezeReason {
     MARKER_OUT_OF_ROI,
     VISION_TIMEOUT,
     POSITION_ERROR,
+    DEPTH_EXCEEDED,
     WATCHDOG_TIMEOUT,
     UNKNOWN_FAULT
 };

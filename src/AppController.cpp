@@ -494,6 +494,7 @@ cv::Scalar severityColor(const std::string& value) {
         value.find("FROZEN") != std::string::npos ||
         value.find("UNSAFE") != std::string::npos ||
         value.find("DETECTED") != std::string::npos ||
+        value.find("EXCEEDED") != std::string::npos ||
         value.find("OUTSIDE") != std::string::npos) {
         return cv::Scalar(60, 60, 200);
     }
@@ -1567,6 +1568,8 @@ const char* safetyStateToString(SafetyState state) {
             return "EXCESSIVE_SPEED";
         case SafetyState::INVALID_ORIENTATION:
             return "INVALID_ORIENTATION";
+        case SafetyState::DEPTH_EXCEEDED:
+            return "DEPTH_EXCEEDED";
         default:
             return "UNKNOWN";
     }
@@ -1581,6 +1584,8 @@ FreezeReason mapSafetyToFreezeReason(SafetyState state) {
         case SafetyState::EXCESSIVE_SPEED:
         case SafetyState::INVALID_ORIENTATION:
             return FreezeReason::POSITION_ERROR;
+        case SafetyState::DEPTH_EXCEEDED:
+            return FreezeReason::DEPTH_EXCEEDED;
         case SafetyState::SAFE:
         default:
             return FreezeReason::UNKNOWN_FAULT;
@@ -1599,6 +1604,8 @@ const char* freezeReasonToString(FreezeReason reason) {
             return "VISION_TIMEOUT";
         case FreezeReason::POSITION_ERROR:
             return "POSITION_ERROR";
+        case FreezeReason::DEPTH_EXCEEDED:
+            return "DEPTH_EXCEEDED";
         case FreezeReason::WATCHDOG_TIMEOUT:
             return "WATCHDOG_TIMEOUT";
         case FreezeReason::UNKNOWN_FAULT:
