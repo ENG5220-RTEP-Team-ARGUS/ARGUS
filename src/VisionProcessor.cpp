@@ -272,15 +272,16 @@ SafetyResult VisionProcessor::process(
 
             // Step 3: Threshold for target hue range.
             //
-            // Red wraps around 0°/180° in OpenCV HSV (H: 0–179), so two
-            // separate inRange calls are combined with bitwise_or:
+            // Two inRange calls are combined with bitwise_or for a generic
+            // dual-band hue model:
             //
-            //   mask1 - lower red:  H in [depthHueLower1, depthHueUpper1]
-            //   mask2 - upper red:  H in [depthHueLower2, depthHueUpper2]
+            //   mask1 - primary hue band: H in [depthHueLower1, depthHueUpper1]
+            //   mask2 - optional second band: H in [depthHueLower2, depthHueUpper2]
             //
-            // For non-wrapping colours (blue, green, yellow) only mask1 is
-            // needed. Setting depthHueLower2 > depthHueUpper2 in VisionConfig
-            // causes inRange to produce an empty mask2, so the bitwise_or
+            // For current black-layer detection, hue band 1 is configured to
+            // full range [0..179] and the decision is effectively controlled
+            // by S/V bounds (especially depthValMax). Setting depthHueLower2 >
+            // depthHueUpper2 in VisionConfig disables mask2 so bitwise_or
             // reduces to mask1 with no code change required.
             cv::Mat mask1, mask2, combinedMask;
 

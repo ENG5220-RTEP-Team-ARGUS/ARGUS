@@ -127,7 +127,7 @@ struct VisionConfig {
 
     // Depth layer colour detection
     //
-    // The forbidden layer is a specific playdough colour (blue) placed
+    // The forbidden layer is a specific playdough colour (black) placed
     // beneath the permitted cutting layers. When this colour becomes visible
     // inside the ROI the tool has exceeded its permitted depth and the robot
     // must freeze and retract immediately.
@@ -142,28 +142,28 @@ struct VisionConfig {
     //   S (saturation): 0 – 255
     //   V (value):      0 – 255
     //
-    // Blue does not wrap around the HSV wheel, so only range 1 is needed.
-    // Range 2 is disabled by setting depthHueLower2 > depthHueUpper2,
+    // For black detection we rely primarily on low V (brightness), not hue.
+    // Hue range is opened to the full wheel so dark pixels of any hue can
+    // match, then constrained by V via depthValMax.
+    // Range 2 remains disabled by setting depthHueLower2 > depthHueUpper2,
     // which causes cv::inRange to produce an empty mask2 so the
     // bitwise_or in Stage 8 reduces to mask1 alone.
 
-    int depthHueLower1 = 100;   ///< Lower hue bound for blue.
-    int depthHueUpper1 = 130;   ///< Upper hue bound for blue.
+    int depthHueLower1 = 0;     ///< Lower hue bound (black mode: full range).
+    int depthHueUpper1 = 179;   ///< Upper hue bound (black mode: full range).
 
     int depthHueLower2 = 255;   ///< Disabled - lower > upper produces empty mask2.
     int depthHueUpper2 = 0;     ///< Disabled - see depthHueLower2 above.
 
-    int depthSatMin = 100;      ///< Minimum saturation threshold.
-                                ///< Filters washed-out or near-grey pixels
-                                ///< that share the target hue by coincidence.
+    int depthSatMin = 0;        ///< Minimum saturation threshold.
+                                ///< Black can be low saturation, so keep open.
 
     int depthSatMax = 255;      ///< Maximum saturation threshold.
 
-    int depthValMin = 50;       ///< Minimum value (brightness) threshold.
-                                ///< Filters very dark pixels that appear
-                                ///< to match the hue under shadow conditions.
+    int depthValMin = 0;        ///< Minimum value (brightness) threshold.
+                                ///< Keep open in black mode.
 
-    int depthValMax = 255;      ///< Maximum value threshold.
+    int depthValMax = 55;       ///< Maximum value threshold (dark pixels only).
 
     /**
      * @brief Minimum number of HSV-matching pixels required to confirm
