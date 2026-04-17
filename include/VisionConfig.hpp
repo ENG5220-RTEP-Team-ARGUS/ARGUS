@@ -127,7 +127,7 @@ struct VisionConfig {
 
     // Depth layer colour detection
     //
-    // The forbidden layer is a specific playdough colour (green) placed
+    // The forbidden layer is a specific playdough colour (yellow) placed
     // beneath the permitted cutting layers. When this colour becomes visible
     // inside the ROI the tool has exceeded its permitted depth and the robot
     // must freeze and retract immediately.
@@ -142,13 +142,13 @@ struct VisionConfig {
     //   S (saturation): 0 – 255
     //   V (value):      0 – 255
     //
-    // Green does not wrap around the HSV wheel, so only range 1 is needed.
+    // Yellow does not wrap around the HSV wheel, so only range 1 is needed.
     // Range 2 remains disabled by setting depthHueLower2 > depthHueUpper2,
     // which causes cv::inRange to produce an empty mask2 so the
     // bitwise_or in Stage 8 reduces to mask1 alone.
 
-    int depthHueLower1 = 40;    ///< Lower hue bound for green.
-    int depthHueUpper1 = 90;    ///< Upper hue bound for green.
+    int depthHueLower1 = 18;    ///< Lower hue bound for yellow.
+    int depthHueUpper1 = 38;    ///< Upper hue bound for yellow.
 
     int depthHueLower2 = 255;   ///< Disabled - lower > upper produces empty mask2.
     int depthHueUpper2 = 0;     ///< Disabled - see depthHueLower2 above.

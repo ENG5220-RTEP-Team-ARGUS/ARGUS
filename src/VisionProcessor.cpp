@@ -278,7 +278,7 @@ SafetyResult VisionProcessor::process(
             //   mask1 - primary hue band: H in [depthHueLower1, depthHueUpper1]
             //   mask2 - optional second band: H in [depthHueLower2, depthHueUpper2]
             //
-            // For current green-layer detection, hue band 1 targets the green
+            // For current yellow-layer detection, hue band 1 targets the yellow
             // interval and mask2 is disabled by setting depthHueLower2 >
             // depthHueUpper2 in VisionConfig, so bitwise_or reduces to mask1
             // with no code change required.
