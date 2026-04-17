@@ -1641,16 +1641,11 @@ void drawMetricsDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
                   white,
                   panel_border);
 
+        const std::string label_with_target =
+            label + " (target: <= " + std::to_string(good_threshold_ms) + " ms)";
         cv::putText(frame,
-                    label,
+                    label_with_target,
                     cv::Point(x1 + 10, y + 15),
-                    cv::FONT_HERSHEY_SIMPLEX,
-                    0.34,
-                    muted_text,
-                    1);
-        cv::putText(frame,
-                    "Target: <= " + std::to_string(good_threshold_ms) + " ms",
-                    cv::Point(x1 + 130, y + 15),
                     cv::FONT_HERSHEY_SIMPLEX,
                     0.32,
                     muted_text,
