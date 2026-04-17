@@ -489,6 +489,78 @@ struct SupervisoryUiModel {
     bool emphasise_danger = false;
 };
 
+const char* safetyStateToUiString(SafetyState state) {
+    switch (state) {
+        case SafetyState::SAFE:
+            return "Safe";
+        case SafetyState::TOOL_NOT_DETECTED:
+            return "Tool not detected";
+        case SafetyState::OUTSIDE_ALLOWED_ZONE:
+            return "Outside allowed zone";
+        case SafetyState::EXCESSIVE_SPEED:
+            return "Excessive speed";
+        case SafetyState::INVALID_ORIENTATION:
+            return "Invalid orientation";
+        case SafetyState::DEPTH_EXCEEDED:
+            return "Depth exceeded";
+        default:
+            return "Unknown";
+    }
+}
+
+const char* guardianStateToUiString(GuardianState state) {
+    switch (state) {
+        case GuardianState::SAFE_MONITORING:
+            return "Safe (monitoring)";
+        case GuardianState::FROZEN_UNSAFE:
+            return "Frozen (unsafe)";
+        case GuardianState::RESET_PENDING:
+            return "Reset (pending)";
+        default:
+            return "Unknown";
+    }
+}
+
+const char* interlockStateToUiString(InterlockState state) {
+    switch (state) {
+        case InterlockState::SAFE:
+            return "Safe";
+        case InterlockState::FROZEN:
+            return "Frozen";
+        case InterlockState::FAULT:
+            return "Fault";
+        default:
+            return "Unknown";
+    }
+}
+
+const char* freezeReasonToUiString(FreezeReason reason) {
+    switch (reason) {
+        case FreezeReason::NONE:
+            return "None";
+        case FreezeReason::MARKER_LOST:
+            return "Tool not detected";
+        case FreezeReason::MARKER_OUT_OF_ROI:
+            return "Out of allowed zone";
+        case FreezeReason::VISION_TIMEOUT:
+            return "Vision timeout";
+        case FreezeReason::POSITION_ERROR:
+            return "Position error";
+        case FreezeReason::DEPTH_EXCEEDED:
+            return "Depth exceeded";
+        case FreezeReason::WATCHDOG_TIMEOUT:
+            return "Watchdog timeout";
+        case FreezeReason::UNKNOWN_FAULT:
+        default:
+            return "Unknown fault";
+    }
+}
+
+bool isFreezeReasonActiveForUi(const std::string& freeze_reason_text) {
+    return freeze_reason_text != "N/A" && freeze_reason_text != "None" &&
+           freeze_reason_text != "NONE";
+}
+
 cv::Scalar severityColor(const std::string& value) {
     if (value.find("FAULT") != std::string::npos ||
         value.find("FROZEN") != std::string::npos ||
@@ -681,7 +753,7 @@ void drawSupervisoryGui(cv::Mat& frame, const SupervisoryUiModel& model) {
                 muted_text,
                 1);
     cv::putText(frame,
-                "Operator -> " + model.operator_prompt,
+                "Control: " + model.operator_prompt,
                 cv::Point(width - 240, header_height + 20),
                 cv::FONT_HERSHEY_SIMPLEX,
                 0.38,
@@ -705,7 +777,7 @@ void drawSupervisoryGui(cv::Mat& frame, const SupervisoryUiModel& model) {
 
     drawLeftCard(82, model.state_color, [&](int x, int y0) {
         cv::putText(frame,
-                    "SAFETY STATE",
+                    "Safety state",
                     cv::Point(x + 12, y0 + 16),
                     cv::FONT_HERSHEY_SIMPLEX,
                     0.35,
@@ -729,14 +801,14 @@ void drawSupervisoryGui(cv::Mat& frame, const SupervisoryUiModel& model) {
 
     drawLeftCard(62, model.motion_color, [&](int x, int y0) {
         cv::putText(frame,
-                    "MOTION GATE",
+                    "Motion",
                     cv::Point(x + 12, y0 + 16),
                     cv::FONT_HERSHEY_SIMPLEX,
                     0.35,
                     muted_text,
                     1);
         cv::putText(frame,
-                    std::string("MOTION ") + model.motion_label,
+                    model.motion_label,
                     cv::Point(x + 12, y0 + 44),
                     uiPlainFontFace(),
                     1.0,
@@ -746,7 +818,7 @@ void drawSupervisoryGui(cv::Mat& frame, const SupervisoryUiModel& model) {
 
     drawLeftCard(62, panel_border, [&](int x, int y0) {
         cv::putText(frame,
-                    "NEXT ACTION",
+                    "Next step",
                     cv::Point(x + 12, y0 + 16),
                     cv::FONT_HERSHEY_SIMPLEX,
                     0.35,
@@ -761,10 +833,10 @@ void drawSupervisoryGui(cv::Mat& frame, const SupervisoryUiModel& model) {
                     1);
     });
 
-    if (model.freeze_reason != "NONE" && model.freeze_reason != "N/A") {
+    if (isFreezeReasonActiveForUi(model.freeze_reason)) {
         drawLeftCard(62, cv::Scalar(60, 60, 200), [&](int x, int y0) {
             cv::putText(frame,
-                        "FREEZE REASON",
+                        "Why stopped",
                         cv::Point(x + 12, y0 + 16),
                         cv::FONT_HERSHEY_SIMPLEX,
                         0.35,
@@ -828,7 +900,7 @@ void drawSupervisoryGui(cv::Mat& frame, const SupervisoryUiModel& model) {
         ry += 16;
     };
 
-    drawRightSectionTitle("SUBSYSTEMS");
+    drawRightSectionTitle("Subsystems");
 
     for (const auto& row : model.status_rows) {
         cv::putText(frame,
@@ -1120,7 +1192,7 @@ void drawStatusDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
                 primary_text,
                 2);
     cv::putText(frame,
-                "Safety Supervisor",
+                "Safety supervisor",
                 cv::Point(50, 38),
                 cv::FONT_HERSHEY_SIMPLEX,
                 0.35,
@@ -1149,7 +1221,7 @@ void drawStatusDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
                 muted_text,
                 1);
     cv::putText(frame,
-                "Operator -> " + model.operator_prompt,
+                "Control: " + model.operator_prompt,
                 cv::Point(12, header_height + 34),
                 cv::FONT_HERSHEY_SIMPLEX,
                 0.32,
@@ -1173,7 +1245,7 @@ void drawStatusDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
 
     drawCard(76, model.state_color, [&](int x, int y0) {
         cv::putText(frame,
-                    "SAFETY STATE",
+                    "Safety state",
                     cv::Point(x + 10, y0 + 15),
                     cv::FONT_HERSHEY_SIMPLEX,
                     0.34,
@@ -1197,14 +1269,14 @@ void drawStatusDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
 
     drawCard(56, model.motion_color, [&](int x, int y0) {
         cv::putText(frame,
-                    "MOTION GATE",
+                    "Motion",
                     cv::Point(x + 10, y0 + 15),
                     cv::FONT_HERSHEY_SIMPLEX,
                     0.34,
                     muted_text,
                     1);
         cv::putText(frame,
-                    std::string("MOTION ") + model.motion_label,
+                    model.motion_label,
                     cv::Point(x + 10, y0 + 40),
                     uiPlainFontFace(),
                     1.0,
@@ -1214,7 +1286,7 @@ void drawStatusDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
 
     drawCard(56, panel_border, [&](int x, int y0) {
         cv::putText(frame,
-                    "NEXT ACTION",
+                    "Next step",
                     cv::Point(x + 10, y0 + 15),
                     cv::FONT_HERSHEY_SIMPLEX,
                     0.34,
@@ -1229,13 +1301,12 @@ void drawStatusDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
                     1);
     });
 
-    const bool freeze_reason_active =
-        model.freeze_reason != "NONE" && model.freeze_reason != "N/A";
+    const bool freeze_reason_active = isFreezeReasonActiveForUi(model.freeze_reason);
     drawCard(56,
              freeze_reason_active ? cv::Scalar(60, 60, 200) : panel_border,
              [&](int x, int y0) {
                  cv::putText(frame,
-                             "FREEZE REASON",
+                             "Why stopped",
                              cv::Point(x + 10, y0 + 15),
                              cv::FONT_HERSHEY_SIMPLEX,
                              0.34,
@@ -1270,7 +1341,7 @@ void drawStatusDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
         ry += 14;
     };
 
-    drawSectionTitle("SUBSYSTEMS");
+    drawSectionTitle("Subsystems");
     for (const auto& row : model.status_rows) {
         cv::putText(frame,
                     row.label,
@@ -1352,14 +1423,14 @@ void drawMetricsDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
                 1);
 
     cv::putText(frame,
-                "FOCUS + EVENT LATENCY",
+                "Focus and safety timing",
                 cv::Point(12, header_height + 22),
                 uiPlainFontFace(),
                 1.0,
                 model.state_color,
                 1);
     cv::putText(frame,
-                "Threshold-based safety timing",
+                "Live signal and event timing",
                 cv::Point(12, header_height + 34),
                 cv::FONT_HERSHEY_SIMPLEX,
                 0.32,
@@ -1376,7 +1447,7 @@ void drawMetricsDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
               white,
               panel_border);
     cv::putText(frame,
-                "FOCUS",
+                "Focus",
                 cv::Point(card_margin + 10, y + 15),
                 cv::FONT_HERSHEY_SIMPLEX,
                 0.34,
@@ -1408,7 +1479,7 @@ void drawMetricsDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
     y += 74;
 
     cv::putText(frame,
-                "VISION PIPELINE (CONTINUOUS)",
+                "Vision processing",
                 cv::Point(card_margin + 2, y + 8),
                 cv::FONT_HERSHEY_SIMPLEX,
                 0.34,
@@ -1441,7 +1512,7 @@ void drawMetricsDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
     y += 66;
 
     cv::putText(frame,
-                "EVENT LATENCY (LOWER IS BETTER)",
+                "Safety timing",
                 cv::Point(card_margin + 2, y + 8),
                 cv::FONT_HERSHEY_SIMPLEX,
                 0.34,
@@ -1477,7 +1548,7 @@ void drawMetricsDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
                     muted_text,
                     1);
         cv::putText(frame,
-                    "target <= " + std::to_string(good_threshold_ms) + " ms",
+                    "Target: <= " + std::to_string(good_threshold_ms) + " ms",
                     cv::Point(x1 + 130, y + 15),
                     cv::FONT_HERSHEY_SIMPLEX,
                     0.32,
@@ -1495,7 +1566,7 @@ void drawMetricsDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
                   panel_border);
 
         cv::Scalar status_color = muted_text;
-        std::string status_text = "NO EVENT";
+        std::string status_text = "No event";
         std::string value_text = "N/A";
         int fill_width = 0;
 
@@ -1504,13 +1575,13 @@ void drawMetricsDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
             value_text = std::to_string(value) + " ms";
 
             if (value <= good_threshold_ms) {
-                status_text = "GOOD";
+                status_text = "Good";
                 status_color = good_color;
             } else if (value <= moderate_threshold_ms) {
-                status_text = "MODERATE";
+                status_text = "Moderate";
                 status_color = moderate_color;
             } else {
-                status_text = "SLOW";
+                status_text = "Slow";
                 status_color = slow_color;
             }
 
@@ -1723,62 +1794,62 @@ struct LiveRoutineDefinition {
     bool auto_progress;
 };
 
-constexpr DemoPoseStep kDemoHomeStep{"HOME", kSmokeHomePose};
-constexpr DemoPoseStep kSurgeryRetractStep{"RETRACT_SAFE", kSurgeryRetractPose};
+constexpr DemoPoseStep kDemoHomeStep{"Home", kSmokeHomePose};
+constexpr DemoPoseStep kSurgeryRetractStep{"Retract (safe)", kSurgeryRetractPose};
 
 constexpr std::array<DemoPoseStep, 11> kLiveSurgeryCutSequence = {{
-    {"GRIP +90 (TOOL)", {0, 0, 0, kSurgeryGripHoldOffset}},
-    {"CUT P1 FORWARD", {0, 0, kSurgeryForwardOffset, kSurgeryGripHoldOffset}},
-    {"CUT P1 DOWN", {0, kSurgeryPassOneDepthOffset, kSurgeryForwardOffset, kSurgeryGripHoldOffset}},
-    {"CUT P1 BACKWARD", {0, kSurgeryPassOneDepthOffset, kSurgeryBackwardOffset, kSurgeryGripHoldOffset}},
-    {"CUT P2 FORWARD", {0, 0, kSurgeryForwardOffset, kSurgeryGripHoldOffset}},
-    {"CUT P2 DOWN (DEEPER)", {0, kSurgeryPassTwoDepthOffset, kSurgeryForwardOffset, kSurgeryGripHoldOffset}},
-    {"CUT P2 BACKWARD", {0, kSurgeryPassTwoDepthOffset, kSurgeryBackwardOffset, kSurgeryGripHoldOffset}},
-    {"CUT P3 FORWARD", {0, 0, kSurgeryForwardOffset, kSurgeryGripHoldOffset}},
-    {"CUT P3 DOWN (FAILURE PASS)", {0, kSurgeryPassThreeDepthOffset, kSurgeryForwardOffset, kSurgeryGripHoldOffset}},
-    {"CUT P3 BACKWARD", {0, kSurgeryPassThreeDepthOffset, kSurgeryBackwardOffset, kSurgeryGripHoldOffset}},
-    {"HOME", {0, 0, 0, kSurgeryGripHoldOffset}},
+    {"Grip +90 (tool)", {0, 0, 0, kSurgeryGripHoldOffset}},
+    {"Cut P1 forward", {0, 0, kSurgeryForwardOffset, kSurgeryGripHoldOffset}},
+    {"Cut P1 down", {0, kSurgeryPassOneDepthOffset, kSurgeryForwardOffset, kSurgeryGripHoldOffset}},
+    {"Cut P1 backward", {0, kSurgeryPassOneDepthOffset, kSurgeryBackwardOffset, kSurgeryGripHoldOffset}},
+    {"Cut P2 forward", {0, 0, kSurgeryForwardOffset, kSurgeryGripHoldOffset}},
+    {"Cut P2 down (deeper)", {0, kSurgeryPassTwoDepthOffset, kSurgeryForwardOffset, kSurgeryGripHoldOffset}},
+    {"Cut P2 backward", {0, kSurgeryPassTwoDepthOffset, kSurgeryBackwardOffset, kSurgeryGripHoldOffset}},
+    {"Cut P3 forward", {0, 0, kSurgeryForwardOffset, kSurgeryGripHoldOffset}},
+    {"Cut P3 down (failure pass)", {0, kSurgeryPassThreeDepthOffset, kSurgeryForwardOffset, kSurgeryGripHoldOffset}},
+    {"Cut P3 backward", {0, kSurgeryPassThreeDepthOffset, kSurgeryBackwardOffset, kSurgeryGripHoldOffset}},
+    {"Home", {0, 0, 0, kSurgeryGripHoldOffset}},
 }};
 
 constexpr std::array<DemoPoseStep, 5> kLiveBaseScanSequence = {{
-    {"HOME", {0, 0, 0, 0}},
-    {"BASE +45", {kDemoBaseStep, 0, 0, 0}},
-    {"HOME", {0, 0, 0, 0}},
-    {"BASE -45", {-kDemoBaseStep, 0, 0, 0}},
-    {"HOME", {0, 0, 0, 0}},
+    {"Home", {0, 0, 0, 0}},
+    {"Base +45", {kDemoBaseStep, 0, 0, 0}},
+    {"Home", {0, 0, 0, 0}},
+    {"Base -45", {-kDemoBaseStep, 0, 0, 0}},
+    {"Home", {0, 0, 0, 0}},
 }};
 
 constexpr std::array<DemoPoseStep, 5> kLiveGripPulseSequence = {{
-    {"HOME", {0, 0, 0, 0}},
-    {"GRIP +45", {0, 0, 0, kDemoGripStep}},
-    {"HOME", {0, 0, 0, 0}},
-    {"GRIP -45", {0, 0, 0, -kDemoGripStep}},
-    {"HOME", {0, 0, 0, 0}},
+    {"Home", {0, 0, 0, 0}},
+    {"Grip +45", {0, 0, 0, kDemoGripStep}},
+    {"Home", {0, 0, 0, 0}},
+    {"Grip -45", {0, 0, 0, -kDemoGripStep}},
+    {"Home", {0, 0, 0, 0}},
 }};
 
 LiveRoutineDefinition getLiveRoutineDefinition(std::size_t index) {
     switch (index) {
         case 1:
             return {1,
-                    "SURGERY_CUT",
+                    "Surgery cut",
                     kLiveSurgeryCutSequence.data(),
                     kLiveSurgeryCutSequence.size(),
                     true};
         case 2:
             return {2,
-                    "BASE_SCAN",
+                    "Base scan",
                     kLiveBaseScanSequence.data(),
                     kLiveBaseScanSequence.size(),
                     true};
         case 3:
             return {3,
-                    "GRIP_PULSE",
+                    "Grip pulse",
                     kLiveGripPulseSequence.data(),
                     kLiveGripPulseSequence.size(),
                     true};
         case 0:
         default:
-            return {0, "MANUAL", nullptr, 0, false};
+            return {0, "Manual", nullptr, 0, false};
     }
 }
 
@@ -2928,7 +2999,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         << " consecutive bad frames, recover after "
         << kLiveRecoverGoodFrameThreshold
         << " consecutive good frames.\n"
-        << "[LIVE_TEST] Modes: 0=MANUAL, 1=SURGERY_CUT, 2=BASE_SCAN, 3=GRIP_PULSE\n"
+        << "[LIVE_TEST] Modes: 0=manual, 1=surgery cut, 2=base scan, 3=grip pulse\n"
         << "[LIVE_TEST] Focus debug enabled: FOCUS_SCORE (Laplacian variance), "
            "higher usually means sharper marker edges.\n";
 
@@ -3534,7 +3605,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
             (current_pose_offsets.upper != pose_slew_target.upper) ||
             (current_pose_offsets.grip != pose_slew_target.grip);
         next_pose_slew_due = std::chrono::steady_clock::now();
-        current_pose_name = "MANUAL";
+        current_pose_name = "Manual";
 
         if (pose_slew_active) {
             std::cout << "[LIVE_TEST] manual " << label;
@@ -3819,32 +3890,32 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
                                               GuardianState::SAFE_MONITORING) &&
                                              interlock->motionAllowed())
                                           : (current_vision_state == SafetyState::SAFE);
-        std::string ui_state_label = "SETUP";
-        std::string ui_state_description = "Waiting for safe scene";
-        std::string next_action = "MAKE SCENE SAFE";
+        std::string ui_state_label = "Setup";
+        std::string ui_state_description = "Waiting for a safe scene";
+        std::string next_action = "Make scene safe";
         if (!guardian_armed && frame_is_safe) {
-            ui_state_label = "READY";
-            ui_state_description = "Scene safe and ready to arm";
-            next_action = "PRESS CONTROL TO ARM";
+            ui_state_label = "Ready";
+            ui_state_description = "Scene is safe and ready to arm";
+            next_action = "Press control to start";
         } else if (guardian_armed && motion_gate_open && decision_is_safe) {
-            ui_state_label = "RUNNING";
-            ui_state_description = "Guard active and motion allowed";
-            next_action = "PRESS CONTROL TO DISARM";
+            ui_state_label = "Running";
+            ui_state_description = "Guard active, motion allowed";
+            next_action = "Press control to stop";
         } else if (guardian_armed &&
                    guardian->getState() == GuardianState::FROZEN_UNSAFE) {
-            ui_state_label = "FROZEN";
-            ui_state_description = "Unsafe detected, motion stopped";
-            next_action = frame_is_safe ? "PRESS CONTROL TO RESUME"
-                                        : "CLEAR WORKSPACE";
+            ui_state_label = "Frozen";
+            ui_state_description = "Unsafe condition detected, motion stopped";
+            next_action = frame_is_safe ? "Press control to resume"
+                                        : "Clear workspace";
         } else if (guardian_armed &&
                    guardian->getState() == GuardianState::RESET_PENDING) {
-            ui_state_label = "WAITING";
+            ui_state_label = "Waiting";
             ui_state_description = "Safe again, waiting for recovery";
-            next_action = "WAIT FOR RECOVERY";
+            next_action = "Waiting for recovery";
         } else if (guardian_armed && frame_is_safe) {
-            ui_state_label = "READY";
+            ui_state_label = "Ready";
             ui_state_description = "Guard armed, motion blocked";
-            next_action = "PRESS CONTROL";
+            next_action = "Press control";
         }
 
         const cv::Scalar focus_color =
@@ -3857,12 +3928,11 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
             " " + getLiveRoutineDefinition(selected_routine_index).name;
         const std::string footer_info =
             std::to_string(frameWidth(display_frame)) + "x" +
-            std::to_string(frameHeight(display_frame)) + " | marker " +
-            std::to_string(options.expected_marker_id) + " | " +
+            std::to_string(frameHeight(display_frame)) + " | " +
             camera_capture.backendName();
 
         SupervisoryUiModel live_ui{};
-        live_ui.mode_title = "LIVE TEST";
+        live_ui.mode_title = "Live test";
         live_ui.state_label = ui_state_label;
         live_ui.state_description = ui_state_description;
         live_ui.state_color =
@@ -3870,14 +3940,17 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
                 ? cv::Scalar(60, 60, 200)
                 : (frame_is_safe ? cv::Scalar(60, 170, 80)
                                  : cv::Scalar(170, 140, 60));
-        live_ui.motion_label = motion_gate_open ? "ALLOWED" : "BLOCKED";
+        live_ui.motion_label = motion_gate_open ? "Allowed" : "Blocked";
         live_ui.motion_color =
             motion_gate_open ? cv::Scalar(60, 170, 80)
                              : (frame_is_safe ? cv::Scalar(50, 180, 230)
                                               : cv::Scalar(60, 60, 200));
-        live_ui.operator_prompt = "space/button = control";
+        live_ui.operator_prompt = "space/button";
         live_ui.next_action = next_action;
-        live_ui.freeze_reason = freeze_reason_text;
+        const FreezeReason interlock_freeze_reason =
+            guardian_armed ? interlock->freezeReason() : FreezeReason::NONE;
+        live_ui.freeze_reason =
+            guardian_armed ? freezeReasonToUiString(interlock_freeze_reason) : "N/A";
         live_ui.footer_info = footer_info;
         live_ui.latency = latency_metrics;
         live_ui.vision_latency_history_us = copyHistory(vision_us_history);
@@ -3888,13 +3961,19 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         live_ui.total_stop_history_ms = copyHistory(total_stop_history_ms);
         live_ui.ack_resume_history_ms = copyHistory(ack_resume_history_ms);
         live_ui.status_rows = {
-            {"Vision", safetyStateToString(current_vision_state),
+            {"Vision", safetyStateToUiString(current_vision_state),
              severityColor(safetyStateToString(current_vision_state))},
-            {"Guardian", guardian_state_text, severityColor(guardian_state_text)},
-            {"Interlock", interlock_state_text, severityColor(interlock_state_text)},
+            {"Guardian",
+             guardian_armed ? guardianStateToUiString(guardian->getState())
+                            : "Disarmed (setup)",
+             severityColor(guardian_state_text)},
+            {"Interlock",
+             guardian_armed ? interlockStateToUiString(interlock->state())
+                            : "Disarmed",
+             severityColor(interlock_state_text)},
             {"Routine", routine_label, cv::Scalar(25, 25, 25)},
             {"Pose", current_pose_name, cv::Scalar(25, 25, 25)},
-            {"Can arm", frame_is_safe ? "YES" : "NO",
+            {"Ready to arm", frame_is_safe ? "Yes" : "No",
              frame_is_safe ? cv::Scalar(60, 170, 80) : cv::Scalar(60, 60, 200)},
         };
         live_ui.show_focus = true;
@@ -3904,11 +3983,11 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         live_ui.focus_fraction = std::clamp(focus_score / 240.0, 0.0, 1.0);
         live_ui.camera_hud_text =
             guardian_armed && guardian->getState() == GuardianState::FROZEN_UNSAFE
-                ? "UNSAFE - MOTION HALTED"
+                ? "Unsafe: stopped"
                 : (guardian_armed && motion_gate_open && decision_is_safe)
-                      ? "LIVE - SUPERVISING"
-                : (!guardian_armed && frame_is_safe) ? "ARMED - AWAITING START"
-                                                     : "INITIALIZING";
+                      ? "Running"
+                : (!guardian_armed && frame_is_safe) ? "Ready to arm"
+                                                     : "Setup";
         live_ui.camera_hud_color =
             guardian_armed && guardian->getState() == GuardianState::FROZEN_UNSAFE
                 ? cv::Scalar(60, 60, 200)
@@ -3918,11 +3997,11 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         live_ui.camera_bottom_right = "30fps";
         live_ui.show_frozen_overlay =
             guardian_armed && guardian->getState() == GuardianState::FROZEN_UNSAFE;
-        live_ui.frozen_overlay_title = "UNSAFE";
-        live_ui.frozen_overlay_subtitle = "MOTION FROZEN - CLEAR WORKSPACE";
+        live_ui.frozen_overlay_title = "Unsafe";
+        live_ui.frozen_overlay_subtitle = "Motion frozen: clear workspace";
         live_ui.show_waiting_overlay =
             guardian_armed && guardian->getState() == GuardianState::RESET_PENDING;
-        live_ui.waiting_overlay_text = "WORKSPACE SAFE - PRESS BUTTON TO RESUME";
+        live_ui.waiting_overlay_text = "Workspace safe: press control to resume";
         live_ui.emphasise_danger =
             guardian_armed && guardian->getState() == GuardianState::FROZEN_UNSAFE;
 
