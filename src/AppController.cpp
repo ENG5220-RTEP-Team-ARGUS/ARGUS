@@ -1038,7 +1038,7 @@ void drawSupervisoryGui(cv::Mat& frame, const SupervisoryUiModel& model) {
     ry += 6;
     drawRightSectionTitle("LATENCY");
     cv::putText(frame,
-                "vision_us " + std::to_string(model.latency.vision_us),
+                "Time to process frame: " + std::to_string(model.latency.vision_us) + " us",
                 cv::Point(rx, ry),
                 uiPlainFontFace(),
                 1.0,
@@ -1046,7 +1046,7 @@ void drawSupervisoryGui(cv::Mat& frame, const SupervisoryUiModel& model) {
                 1);
     ry += 16;
     cv::putText(frame,
-                "unsafe_ms " +
+                "Time to detect unsafe: " +
                     formatLatencyMilliseconds(model.latency.unsafe_detect_ms),
                 cv::Point(rx, ry),
                 uiPlainFontFace(),
@@ -1055,7 +1055,7 @@ void drawSupervisoryGui(cv::Mat& frame, const SupervisoryUiModel& model) {
                 1);
     ry += 16;
     cv::putText(frame,
-                "stop_ms " +
+                "Time to stop motion: " +
                     formatLatencyMilliseconds(model.latency.total_stop_ms),
                 cv::Point(rx, ry),
                 uiPlainFontFace(),
@@ -1599,7 +1599,7 @@ void drawMetricsDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
               white,
               panel_border);
     cv::putText(frame,
-                "vision_us " + std::to_string(model.latency.vision_us),
+                "Time to process frame: " + std::to_string(model.latency.vision_us) + " us",
                 cv::Point(card_margin + 10, y + 16),
                 uiPlainFontFace(),
                 0.95,
@@ -1715,9 +1715,9 @@ void drawMetricsDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
         y += card_height + 8;
     };
 
-    drawLatencyBar("Unsafe detect", model.latency.unsafe_detect_ms, 30);
-    drawLatencyBar("Freeze pipeline", model.latency.freeze_pipeline_ms, 3000);
-    drawLatencyBar("Total stop", model.latency.total_stop_ms, 6000);
+    drawLatencyBar("Time to detect unsafe", model.latency.unsafe_detect_ms, 30);
+    drawLatencyBar("Time to issue freeze", model.latency.freeze_pipeline_ms, 3000);
+    drawLatencyBar("Time to stop motion", model.latency.total_stop_ms, 6000);
 
     const cv::Scalar border_color =
         model.emphasise_danger ? cv::Scalar(60, 60, 200) : model.state_color;
