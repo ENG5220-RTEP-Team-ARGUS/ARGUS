@@ -593,6 +593,88 @@ void drawPanel(cv::Mat& frame,
     drawRectangle(frame, top_left, bottom_right, border, 1);
 }
 
+const cv::Mat& argusLogoImage() {
+    static cv::Mat logo;
+    static bool loaded = false;
+    if (!loaded) {
+        loaded = true;
+        const std::array<const char*, 4> candidate_paths = {{
+            "gui/ENG5220_team-ARGUS_logo-icon_no-bg.png",
+            "./gui/ENG5220_team-ARGUS_logo-icon_no-bg.png",
+            "../gui/ENG5220_team-ARGUS_logo-icon_no-bg.png",
+            "../../gui/ENG5220_team-ARGUS_logo-icon_no-bg.png",
+        }};
+
+        for (const char* path : candidate_paths) {
+            cv::Mat candidate = cv::imread(path, cv::IMREAD_UNCHANGED);
+            if (!candidate.empty()) {
+                logo = std::move(candidate);
+                break;
+            }
+        }
+    }
+    return logo;
+}
+
+bool drawArgusLogo(cv::Mat& frame, const cv::Rect& slot) {
+    const cv::Mat& logo = argusLogoImage();
+    if (logo.empty() || slot.width <= 2 || slot.height <= 2) {
+        return false;
+    }
+
+    const int available_w = slot.width - 2;
+    const int available_h = slot.height - 2;
+    const double scale = std::min(
+        static_cast<double>(available_w) / static_cast<double>(logo.cols),
+        static_cast<double>(available_h) / static_cast<double>(logo.rows));
+    if (scale <= 0.0) {
+        return false;
+    }
+
+    const int draw_w = std::max(1, static_cast<int>(logo.cols * scale));
+    const int draw_h = std::max(1, static_cast<int>(logo.rows * scale));
+    cv::Mat resized_logo;
+    cv::resize(logo, resized_logo, cv::Size(draw_w, draw_h), 0, 0, cv::INTER_AREA);
+
+    const int draw_x = slot.x + (slot.width - draw_w) / 2;
+    const int draw_y = slot.y + (slot.height - draw_h) / 2;
+    if (draw_x < 0 || draw_y < 0 || draw_x + draw_w > frame.cols ||
+        draw_y + draw_h > frame.rows) {
+        return false;
+    }
+
+    cv::Mat dst_roi = frame(cv::Rect(draw_x, draw_y, draw_w, draw_h));
+    if (resized_logo.channels() == 4) {
+        cv::Mat src_bgr;
+        cv::cvtColor(resized_logo, src_bgr, cv::COLOR_BGRA2BGR);
+
+        std::vector<cv::Mat> channels;
+        cv::split(resized_logo, channels);
+        cv::Mat alpha_f;
+        channels[3].convertTo(alpha_f, CV_32FC1, 1.0 / 255.0);
+
+        cv::Mat src_f;
+        cv::Mat dst_f;
+        src_bgr.convertTo(src_f, CV_32FC3, 1.0 / 255.0);
+        dst_roi.convertTo(dst_f, CV_32FC3, 1.0 / 255.0);
+
+        cv::Mat alpha3;
+        std::vector<cv::Mat> alpha_channels(3, alpha_f);
+        cv::merge(alpha_channels, alpha3);
+        cv::Mat blended =
+            src_f.mul(alpha3) + dst_f.mul(cv::Scalar::all(1.0) - alpha3);
+        blended.convertTo(dst_roi, CV_8UC3, 255.0);
+        return true;
+    }
+
+    if (resized_logo.channels() == 3) {
+        resized_logo.copyTo(dst_roi);
+        return true;
+    }
+
+    return false;
+}
+
 void drawSparkline(cv::Mat& frame,
                    cv::Point top_left,
                    cv::Point bottom_right,
@@ -701,13 +783,15 @@ void drawSupervisoryGui(cv::Mat& frame, const SupervisoryUiModel& model) {
               cv::Point(40, 32),
               panel_fill,
               model.state_color);
-    cv::putText(frame,
-                "A",
-                cv::Point(22, 25),
-                cv::FONT_HERSHEY_SIMPLEX,
-                0.6,
-                primary_text,
-                2);
+    if (!drawArgusLogo(frame, cv::Rect(12, 6, 29, 27))) {
+        cv::putText(frame,
+                    "A",
+                    cv::Point(22, 25),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    primary_text,
+                    2);
+    }
 
     cv::putText(frame,
                 "ARGUS",
@@ -1176,13 +1260,15 @@ void drawStatusDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
               cv::Point(38, 34),
               panel_fill,
               model.state_color);
-    cv::putText(frame,
-                "A",
-                cv::Point(20, 27),
-                cv::FONT_HERSHEY_SIMPLEX,
-                0.6,
-                primary_text,
-                2);
+    if (!drawArgusLogo(frame, cv::Rect(10, 8, 29, 27))) {
+        cv::putText(frame,
+                    "A",
+                    cv::Point(20, 27),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    primary_text,
+                    2);
+    }
 
     cv::putText(frame,
                 "ARGUS",
@@ -1400,16 +1486,31 @@ void drawMetricsDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
               panel_fill,
               panel_border);
 
+    drawPanel(frame,
+              cv::Point(10, 8),
+              cv::Point(38, 34),
+              panel_fill,
+              model.state_color);
+    if (!drawArgusLogo(frame, cv::Rect(10, 8, 29, 27))) {
+        cv::putText(frame,
+                    "A",
+                    cv::Point(20, 27),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    primary_text,
+                    2);
+    }
+
     cv::putText(frame,
                 "ARGUS",
-                cv::Point(12, 23),
+                cv::Point(50, 23),
                 cv::FONT_HERSHEY_SIMPLEX,
                 0.55,
                 primary_text,
                 2);
     cv::putText(frame,
                 "Metrics",
-                cv::Point(12, 38),
+                cv::Point(50, 38),
                 cv::FONT_HERSHEY_SIMPLEX,
                 0.35,
                 muted_text,
