@@ -127,7 +127,7 @@ struct VisionConfig {
 
     // Depth layer colour detection
     //
-    // The forbidden layer is a specific playdough colour (blue) placed
+    // The forbidden layer is a specific playdough colour (green) placed
     // beneath the permitted cutting layers. When this colour becomes visible
     // inside the ROI the tool has exceeded its permitted depth and the robot
     // must freeze and retract immediately.
@@ -142,26 +142,24 @@ struct VisionConfig {
     //   S (saturation): 0 – 255
     //   V (value):      0 – 255
     //
-    // Blue does not wrap around the HSV wheel, so only range 1 is needed.
-    // Range 2 is disabled by setting depthHueLower2 > depthHueUpper2,
+    // Green does not wrap around the HSV wheel, so only range 1 is needed.
+    // Range 2 remains disabled by setting depthHueLower2 > depthHueUpper2,
     // which causes cv::inRange to produce an empty mask2 so the
     // bitwise_or in Stage 8 reduces to mask1 alone.
 
-    int depthHueLower1 = 100;   ///< Lower hue bound for blue.
-    int depthHueUpper1 = 130;   ///< Upper hue bound for blue.
+    int depthHueLower1 = 40;    ///< Lower hue bound for green.
+    int depthHueUpper1 = 90;    ///< Upper hue bound for green.
 
     int depthHueLower2 = 255;   ///< Disabled - lower > upper produces empty mask2.
     int depthHueUpper2 = 0;     ///< Disabled - see depthHueLower2 above.
 
-    int depthSatMin = 100;      ///< Minimum saturation threshold.
-                                ///< Filters washed-out or near-grey pixels
-                                ///< that share the target hue by coincidence.
+    int depthSatMin = 70;       ///< Minimum saturation threshold.
+                                ///< Filters weak/grey pixels.
 
     int depthSatMax = 255;      ///< Maximum saturation threshold.
 
-    int depthValMin = 50;       ///< Minimum value (brightness) threshold.
-                                ///< Filters very dark pixels that appear
-                                ///< to match the hue under shadow conditions.
+    int depthValMin = 40;       ///< Minimum value (brightness) threshold.
+                                ///< Filters very dark pixels.
 
     int depthValMax = 255;      ///< Maximum value threshold.
 
