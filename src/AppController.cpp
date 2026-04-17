@@ -1707,7 +1707,8 @@ constexpr std::array<JointPulseCalibration, MotionController::kServoCount>
     }};
 
 constexpr SmokeJointOffsets kSmokeHomePose{0, 0, 0, 0};
-constexpr SmokeJointOffsets kSurgeryRetractPose{0, 35, -30, 0};
+constexpr SmokeJointOffsets kSurgeryRetractPose{
+    0, 35, -30, kSurgeryGripHoldOffset};
 
 struct DemoPoseStep {
     const char* name;
@@ -2979,6 +2980,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         std::chrono::steady_clock::now();
     bool freeze_command_pending = false;
     std::optional<std::chrono::steady_clock::time_point> freeze_command_due;
+    bool freeze_waiting_for_retract_logged = false;
     ControllerEventQueue control_events;
     CppTimerCallback live_step_timer;
     bool live_step_timer_started = false;
@@ -3178,6 +3180,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         pending_freeze_reason = FreezeReason::UNKNOWN_FAULT;
         freeze_command_pending = false;
         freeze_command_due.reset();
+        freeze_waiting_for_retract_logged = false;
         guardian = std::make_unique<GuardianStateMachine>(
             kLiveFreezeBadFrameThreshold,
             kLiveRecoverGoodFrameThreshold);
@@ -3207,6 +3210,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
             freeze_command_pending = true;
             freeze_command_due =
                 std::chrono::steady_clock::now() + kSurgeryRetractDwell;
+            freeze_waiting_for_retract_logged = false;
             motion_gate_open = false;
             waiting_for_ack = false;
             waiting_for_ack_announced = false;
@@ -3260,9 +3264,19 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         if (now < *freeze_command_due) {
             return true;
         }
+        if (pose_slew_active) {
+            if (!freeze_waiting_for_retract_logged) {
+                std::cout << "[LIVE_TEST] freeze pending: waiting for retract "
+                             "completion"
+                          << std::endl;
+                freeze_waiting_for_retract_logged = true;
+            }
+            return true;
+        }
 
         freeze_command_pending = false;
         freeze_command_due.reset();
+        freeze_waiting_for_retract_logged = false;
         const auto freeze_cmd_start = std::chrono::steady_clock::now();
         interlock->onControlEvent(ControlEvent::FREEZE_NOW, pending_freeze_reason);
         const auto freeze_cmd_end = std::chrono::steady_clock::now();
@@ -3379,6 +3393,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         pending_unsafe_decision_timestamp.reset();
         freeze_command_pending = false;
         freeze_command_due.reset();
+        freeze_waiting_for_retract_logged = false;
         std::cout << "[LIVE_TEST] ARM accepted: guardian enforcement is now ACTIVE."
                   << std::endl;
         return true;
@@ -3405,6 +3420,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         pending_unsafe_decision_timestamp.reset();
         freeze_command_pending = false;
         freeze_command_due.reset();
+        freeze_waiting_for_retract_logged = false;
         pose_slew_active = false;
         stopLiveStepTimer();
         next_routine_step_index = 0;
