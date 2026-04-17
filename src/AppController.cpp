@@ -32,9 +32,9 @@
 
 namespace {
 
-constexpr const char* kLiveCameraWindowName = "ARGUS Live Camera";
-constexpr const char* kLiveStatusWindowName = "ARGUS Live Status";
-constexpr const char* kLiveMetricsWindowName = "ARGUS Live Metrics";
+constexpr const char* kLiveCameraWindowName = "ARGUS live camera";
+constexpr const char* kLiveStatusWindowName = "ARGUS live status";
+constexpr const char* kLiveMetricsWindowName = "ARGUS live metrics";
 constexpr const char* kDefaultI2cDevicePath = "/dev/i2c-1";
 constexpr std::uint8_t kDefaultPca9685Address = 0x40;
 constexpr float kDefaultPwmFrequencyHz = 50.0f;
