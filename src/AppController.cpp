@@ -47,7 +47,9 @@ constexpr MotionChannelMap kMotionChannelMap{
     kLowerServoChannel,
     kUpperServoChannel,
     kGripServoChannel};
-constexpr int kLiveFreezeBadFrameThreshold = 30;
+// 15 bad frames keeps freeze pipeline latency around ~450-900 ms
+// across typical 20-30 FPS capture rates.
+constexpr int kLiveFreezeBadFrameThreshold = 15;
 constexpr int kLiveRecoverGoodFrameThreshold = 3;
 constexpr std::chrono::milliseconds kSmokeStepDwell{3000};
 constexpr int kSmokeBaseMinOffset = -90;
@@ -1711,7 +1713,7 @@ void drawMetricsDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
     };
 
     drawLatencyBar("Time to detect unsafe", model.latency.unsafe_detect_ms, 30);
-    drawLatencyBar("Time to issue freeze", model.latency.freeze_pipeline_ms, 3000);
+    drawLatencyBar("Time to issue freeze", model.latency.freeze_pipeline_ms, 900);
     drawLatencyBar("Time to stop motion", model.latency.total_stop_ms, 6000);
 
     const cv::Scalar border_color =
