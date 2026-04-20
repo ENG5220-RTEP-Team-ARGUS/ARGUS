@@ -3848,6 +3848,48 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
     cv::namedWindow(kLiveCameraWindowName, cv::WINDOW_AUTOSIZE);
     cv::namedWindow(kLiveStatusWindowName, cv::WINDOW_AUTOSIZE);
 
+    // Add dynamic colour tuning sliders to the status window
+    // Allows real-time adjustment of forbidden colour detection under varying lighting
+    VisionConfig dynamicConfig = vision_config;  // Copy for slider modifications
+    auto updateVisionConfig = [&]() {
+        vision_processor.updateConfig(dynamicConfig);
+    };
+
+    cv::createTrackbar("Hue Lower", kLiveStatusWindowName, &dynamicConfig.depthHueLower1, 179, [](int, void* userdata) {
+        auto* updater = static_cast<std::function<void()>*>(userdata);
+        (*updater)();
+    }, &updateVisionConfig);
+
+    cv::createTrackbar("Hue Upper", kLiveStatusWindowName, &dynamicConfig.depthHueUpper1, 179, [](int, void* userdata) {
+        auto* updater = static_cast<std::function<void()>*>(userdata);
+        (*updater)();
+    }, &updateVisionConfig);
+
+    cv::createTrackbar("Sat Min", kLiveStatusWindowName, &dynamicConfig.depthSatMin, 255, [](int, void* userdata) {
+        auto* updater = static_cast<std::function<void()>*>(userdata);
+        (*updater)();
+    }, &updateVisionConfig);
+
+    cv::createTrackbar("Sat Max", kLiveStatusWindowName, &dynamicConfig.depthSatMax, 255, [](int, void* userdata) {
+        auto* updater = static_cast<std::function<void()>*>(userdata);
+        (*updater)();
+    }, &updateVisionConfig);
+
+    cv::createTrackbar("Val Min", kLiveStatusWindowName, &dynamicConfig.depthValMin, 255, [](int, void* userdata) {
+        auto* updater = static_cast<std::function<void()>*>(userdata);
+        (*updater)();
+    }, &updateVisionConfig);
+
+    cv::createTrackbar("Val Max", kLiveStatusWindowName, &dynamicConfig.depthValMax, 255, [](int, void* userdata) {
+        auto* updater = static_cast<std::function<void()>*>(userdata);
+        (*updater)();
+    }, &updateVisionConfig);
+
+    cv::createTrackbar("Pixel Thresh", kLiveStatusWindowName, &dynamicConfig.depthPixelThreshold, 5000, [](int, void* userdata) {
+        auto* updater = static_cast<std::function<void()>*>(userdata);
+        (*updater)();
+    }, &updateVisionConfig);
+
     struct LiveStatusSnapshot {
         bool guardian_armed = false;
         bool scene_safe = false;

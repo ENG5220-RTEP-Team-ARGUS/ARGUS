@@ -1,3 +1,13 @@
+/**
+ * @file GuardianStateMachine.hpp
+ * @brief Finite state machine for ARGUS safety supervision.
+ *
+ * Implements a three-state FSM that monitors vision safety and controls
+ * motion freeze/recovery. Transitions are event-driven with hysteresis
+ * to prevent oscillations. Designed for real-time operation with bounded
+ * latency and no dynamic memory allocation.
+ */
+
 #ifndef GUARDIAN_STATE_MACHINE_HPP  // To prevent multiple inclusion of this header file
 #define GUARDIAN_STATE_MACHINE_HPP  // To define the guard macro (included only once)
 
@@ -6,32 +16,99 @@
 
 
 // Enum Definitions
+
+/**
+ * @brief States of the Guardian State Machine.
+ */
 enum class GuardianState {
-    SAFE_MONITORING,   // Normal monitoring state (system running normally)
-    FROZEN_UNSAFE,     // Unsafe detected -> motion is frozen
-    RESET_PENDING      // Operator acknowledged -> waiting for stable recovery
+    SAFE_MONITORING,   ///< Normal monitoring state (system running normally)
+    FROZEN_UNSAFE,     ///< Unsafe detected -> motion is frozen
+    RESET_PENDING      ///< Operator acknowledged -> waiting for stable recovery
 };
 
+/**
+ * @brief Status of individual vision frames.
+ */
 enum class FrameStatus {
-    FRAME_GOOD,        // Frame is in safe condition
-    FRAME_BAD          // Frame indicates unsafe condition
+    FRAME_GOOD,        ///< Frame is in safe condition
+    FRAME_BAD          ///< Frame indicates unsafe condition
 };
 
+/**
+ * @brief Events that trigger state transitions.
+ */
 enum class GuardianEvent {
-    FRAME_GOOD,        // Event triggered when a safe frame is received
-    FRAME_BAD,         // Event triggered when an unsafe frame is received
-    OPERATOR_ACK       // Event triggered when operator acknowledges/reset
+    FRAME_GOOD,        ///< Event triggered when a safe frame is received
+    FRAME_BAD,         ///< Event triggered when an unsafe frame is received
+    OPERATOR_ACK       ///< Event triggered when operator acknowledges/reset
 };
 
+/**
+ * @brief Actions taken in response to events.
+ */
 enum class GuardianAction {
-    NONE,              // No action required
-    FREEZE_NOW,        // Immediately freeze/block motion
-    CLEAR_FREEZE       // Clear freeze and resume motion
+    NONE,              ///< No action required
+    FREEZE_NOW,        ///< Immediately freeze/block motion
+    CLEAR_FREEZE       ///< Clear freeze and resume motion
 };
 
-
-// Class Declaration
+/**
+ * @brief Guardian State Machine for ARGUS safety supervision.
+ *
+ * A three-state FSM that monitors vision safety and controls motion freeze/recovery.
+ * Transitions are event-driven with hysteresis to prevent oscillations. Designed for
+ * real-time operation with bounded latency and no dynamic memory allocation.
+ *
+ * State transitions:
+ * - SAFE_MONITORING: Normal operation, monitoring for unsafe frames
+ * - FROZEN_UNSAFE: Motion frozen due to consecutive unsafe frames
+ * - RESET_PENDING: Waiting for operator ack after safety recovery
+ *
+ * @note Thread-safe for single-writer, multiple-reader access patterns.
+ */
 class GuardianStateMachine {
+public:
+    /**
+     * @brief Constructs the Guardian State Machine with hysteresis thresholds.
+     *
+     * @param freezeThreshold Number of consecutive bad frames to trigger freeze
+     * @param recoverThreshold Number of consecutive good frames to allow recovery
+     */
+    GuardianStateMachine(int freezeThreshold = 15, int recoverThreshold = 10);
+
+    /**
+     * @brief Processes a vision frame and returns the required action.
+     *
+     * Updates internal state based on frame status and returns any action
+     * that should be taken (freeze, clear freeze, or none).
+     *
+     * @param frameStatus Status of the current vision frame
+     * @return Action to take based on state transition
+     */
+    GuardianAction processFrame(FrameStatus frameStatus);
+
+    /**
+     * @brief Handles operator acknowledgment event.
+     *
+     * Should be called when the operator acknowledges a freeze event.
+     * Transitions from RESET_PENDING back to SAFE_MONITORING.
+     *
+     * @return Action to take (typically CLEAR_FREEZE)
+     */
+    GuardianAction acknowledgeReset();
+
+    /**
+     * @brief Gets the current state of the FSM.
+     * @return Current GuardianState
+     */
+    GuardianState getCurrentState() const;
+
+    /**
+     * @brief Gets a string representation of the current state.
+     * @return State name as string
+     */
+    std::string getCurrentStateString() const;
+
 private:
 
     // Current state of the state machine
