@@ -144,7 +144,7 @@ Key docs:
 - [System architecture diagram](docs/architecture/system_software_architecture.png)
 - [Guardian state machine](docs/architecture/guardian_state_machine.png)
 - [Threading model](docs/architecture/threading_model.png)
-- [Vision safety pipeline (PDF)](docs/architecture/Vision_Safety_Pipeline.pdf)
+- [Vision safety pipeline (PDF)](docs/architecture/vision_safety_pipeline.png)
 - [Compliance matrix](docs/compliance_matrix.md)
 - [Compliance ADR](docs/adr/001-compliance-strategy.md)
 
