@@ -2485,41 +2485,11 @@ int AppController::runButtonTest() {
         return 1;
     }
 
-    bool pressed = false;
-    if (!button_module.readAcknowledgePressed(pressed)) {
-        std::cerr << "[BUTTON_TEST] initial read failed: "
-                  << button_module.lastErrorString() << std::endl;
-        return 1;
-    }
-
-    bool last_pressed = pressed;
-    std::cout << "[BUTTON_TEST] state="
-              << (pressed ? "PRESSED" : "RELEASED") << std::endl;
-
     while (true) {
-        if (!button_module.readAcknowledgePressed(pressed)) {
-            std::cerr << "[BUTTON_TEST] read failed: "
-                      << button_module.lastErrorString() << std::endl;
-            return 1;
-        }
-
-        if (pressed != last_pressed) {
-            last_pressed = pressed;
-            std::cout << "[BUTTON_TEST] state="
-                      << (pressed ? "PRESSED" : "RELEASED") << std::endl;
-        }
-
         PhysicalButtonEvent event;
-        while (button_module.poll(event)) {
+        if (button_module.waitForEvent(event, std::chrono::milliseconds(250))) {
             std::cout << "[BUTTON_TEST] event="
                       << PhysicalButtonModule::eventToString(event) << std::endl;
-        }
-
-        std::string timer_error;
-        if (!waitForCppTimerDelay(std::chrono::milliseconds(20), timer_error)) {
-            std::cerr << "[BUTTON_TEST] delay timer failed: " << timer_error
-                      << std::endl;
-            return 1;
         }
     }
 }
@@ -4101,6 +4071,19 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
             }
         }
     });
+    std::atomic<bool> button_stop_requested{false};
+    std::thread button_thread;
+    if (button_module.available()) {
+        button_thread = std::thread([&]() {
+            while (!button_stop_requested.load(std::memory_order_relaxed)) {
+                PhysicalButtonEvent button_event;
+                if (button_module.waitForEvent(button_event,
+                                               std::chrono::milliseconds(250))) {
+                    control_events.pushButton(button_event);
+                }
+            }
+        });
+    }
 
     constexpr int kLiveStatusWidth = 430;
     constexpr int kLiveMetricsWidth = 430;
@@ -4126,11 +4109,6 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         std::string guardian_state_text = "DISARMED_SETUP";
         std::string interlock_state_text = "DISARMED";
         std::string freeze_reason_text = "N/A";
-
-        PhysicalButtonEvent button_event;
-        while (button_module.poll(button_event)) {
-            control_events.pushButton(button_event);
-        }
 
         if (!control_events.drain(handleControlEvent)) {
             motion_faulted = true;
@@ -4439,6 +4417,10 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
     capture_stop_requested.store(true, std::memory_order_relaxed);
     if (capture_thread.joinable()) {
         capture_thread.join();
+    }
+    button_stop_requested.store(true, std::memory_order_relaxed);
+    if (button_thread.joinable()) {
+        button_thread.join();
     }
 
     cv::destroyWindow(kLiveCameraWindowName);

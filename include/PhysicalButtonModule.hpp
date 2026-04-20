@@ -36,6 +36,10 @@ public:
 
     bool available() const noexcept;
     bool poll(PhysicalButtonEvent& event) noexcept;
+    // Waits for the next debounced press event using blocking GPIO edge events.
+    // Returns false on timeout or if no event is available.
+    bool waitForEvent(PhysicalButtonEvent& event,
+                      std::chrono::milliseconds timeout) noexcept;
     bool readAcknowledgePressed(bool& pressed) noexcept;
     const char* lastErrorString() const noexcept;
     const char* statusString() const noexcept;

@@ -1,6 +1,7 @@
 #include "PhysicalButtonModule.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <cctype>
 #include <cstdint>
@@ -13,6 +14,7 @@
 #include <vector>
 
 #include <linux/gpio.h>
+#include <poll.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
 
@@ -144,7 +146,9 @@ std::vector<GpioChipCandidate> enumerateGpioChips() {
 }
 
 std::uint64_t makePreferredLineFlags(bool active_low) {
-    std::uint64_t flags = static_cast<std::uint64_t>(GPIO_V2_LINE_FLAG_INPUT);
+    std::uint64_t flags = static_cast<std::uint64_t>(GPIO_V2_LINE_FLAG_INPUT) |
+                          static_cast<std::uint64_t>(GPIO_V2_LINE_FLAG_EDGE_RISING) |
+                          static_cast<std::uint64_t>(GPIO_V2_LINE_FLAG_EDGE_FALLING);
     if (active_low) {
         flags |= static_cast<std::uint64_t>(GPIO_V2_LINE_FLAG_ACTIVE_LOW);
         flags |= static_cast<std::uint64_t>(GPIO_V2_LINE_FLAG_BIAS_PULL_UP);
@@ -155,7 +159,9 @@ std::uint64_t makePreferredLineFlags(bool active_low) {
 }
 
 std::uint64_t makeFallbackLineFlags(bool active_low) {
-    std::uint64_t flags = static_cast<std::uint64_t>(GPIO_V2_LINE_FLAG_INPUT);
+    std::uint64_t flags = static_cast<std::uint64_t>(GPIO_V2_LINE_FLAG_INPUT) |
+                          static_cast<std::uint64_t>(GPIO_V2_LINE_FLAG_EDGE_RISING) |
+                          static_cast<std::uint64_t>(GPIO_V2_LINE_FLAG_EDGE_FALLING);
     if (active_low) {
         flags |= static_cast<std::uint64_t>(GPIO_V2_LINE_FLAG_ACTIVE_LOW);
     }
@@ -352,6 +358,89 @@ bool PhysicalButtonModule::poll(PhysicalButtonEvent& event) noexcept {
     return sampleChannel(disarm_channel_, now, event) ||
            sampleChannel(acknowledge_channel_, now, event) ||
            sampleChannel(arm_channel_, now, event);
+}
+
+bool PhysicalButtonModule::waitForEvent(PhysicalButtonEvent& event,
+                                        std::chrono::milliseconds timeout) noexcept {
+    std::array<ChannelState*, 3> channels{
+        &disarm_channel_,
+        &acknowledge_channel_,
+        &arm_channel_,
+    };
+    std::vector<pollfd> fds;
+    std::vector<ChannelState*> ready_channels;
+    fds.reserve(channels.size());
+    ready_channels.reserve(channels.size());
+
+    for (ChannelState* channel : channels) {
+        if (channel == nullptr || !channel->active || channel->line_fd < 0) {
+            continue;
+        }
+
+        pollfd fd{};
+        fd.fd = channel->line_fd;
+        fd.events = POLLIN;
+        fds.push_back(fd);
+        ready_channels.push_back(channel);
+    }
+
+    if (fds.empty()) {
+        return false;
+    }
+
+    int timeout_ms = -1;
+    if (timeout.count() >= 0) {
+        const long long requested_timeout = timeout.count();
+        timeout_ms = static_cast<int>(
+            std::min<long long>(requested_timeout, std::numeric_limits<int>::max()));
+    }
+
+    const int ready = ::poll(fds.data(), static_cast<nfds_t>(fds.size()), timeout_ms);
+    if (ready <= 0) {
+        return false;
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+    for (std::size_t i = 0; i < fds.size(); ++i) {
+        if ((fds[i].revents & POLLIN) == 0) {
+            continue;
+        }
+
+        ChannelState& channel = *ready_channels[i];
+        gpio_v2_line_event line_event{};
+        const ssize_t read_bytes = ::read(channel.line_fd, &line_event, sizeof(line_event));
+        if (read_bytes != static_cast<ssize_t>(sizeof(line_event))) {
+            continue;
+        }
+
+        bool pressed = false;
+        if (line_event.id == GPIO_V2_LINE_EVENT_RISING_EDGE) {
+            pressed = true;
+        } else if (line_event.id == GPIO_V2_LINE_EVENT_FALLING_EDGE) {
+            pressed = false;
+        } else {
+            continue;
+        }
+
+        if (pressed == channel.stable_pressed) {
+            continue;
+        }
+
+        const auto since_last_transition = now - channel.last_transition;
+        if (since_last_transition < config_.debounce) {
+            continue;
+        }
+
+        channel.last_transition = now;
+        channel.last_sample_pressed = pressed;
+        channel.stable_pressed = pressed;
+        if (pressed) {
+            event = channel.event;
+            return true;
+        }
+    }
+
+    return false;
 }
 
 bool PhysicalButtonModule::readAcknowledgePressed(bool& pressed) noexcept {

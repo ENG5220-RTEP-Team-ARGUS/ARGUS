@@ -28,7 +28,7 @@ realtime/event-driven style shown in the Bernd Porr references.
 | Reference repo | Role for ARGUS | Current fit | Main gap | Planned action | Priority |
 | --- | --- | --- | --- | --- | --- |
 | `realtime_cpp_coding` | Compliance standard and design checklist | Partial | Top-level frame progression is still loop-driven even after timer/button event queue improvements | Keep using it as the top-level standard and close remaining event-flow gaps incrementally | High |
-| `cppTimer` | Timer implementation source | High | Directly integrated for pacing/backoff and button-test delay; needs repeated Pi runtime evidence | Keep `cppTimer` as the timer primitive and collect backend/runtime validation evidence | High |
+| `cppTimer` | Timer implementation source | High | Directly integrated for pacing/backoff; needs repeated Pi runtime evidence | Keep `cppTimer` as the timer primitive and collect backend/runtime validation evidence | High |
 | `libcamera2opencv` | Camera backend source | High | Bundled backend is integrated, but still requires repeatable Pi validation in normal workflow | Keep `libcamera2opencv` first in auto mode, keep OpenCV/V4L2 fallback, and validate via backend-check mode | High |
 | `cpp_event_callbacks` | Architectural guidance for event handoff | Medium | Timer and button events now pass through explicit queued controller events, but frame flow is still consumed in loop order | Continue refactoring frame/timer/button handoff toward callback/event boundaries without architecture rewrite | Medium |
 | `rpi_pwm` | Alternative PWM path | Not applicable to current design | ARGUS uses PCA9685 over I2C, not Pi PWM GPIO18/19 | Document as out of scope unless motion hardware is redesigned | Low |
@@ -68,13 +68,13 @@ Compliance action:
 
 Current compliance gaps:
 
-- button input is working and now routed through an explicit controller event queue
-- the GPIO backend itself is still sampled by the controller loop
+- button input now uses blocking edge-event wait and is routed through an explicit controller event queue from a dedicated thread
+- top-level orchestration is still loop-driven in `AppController`, so button handling is event-driven but not yet a fully callback-only architecture
 
 Compliance action:
 
 - keep the GPIO character-device implementation
-- keep moving button/frame integration toward cleaner event-style boundaries
+- keep moving frame/timer integration toward cleaner event-style boundaries
 
 ### `src/MotionController.cpp`
 
