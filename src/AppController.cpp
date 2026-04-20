@@ -3968,13 +3968,15 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
     constexpr const char* kSliderHue = "Hue";
     constexpr const char* kSliderSaturation = "Saturation";
     constexpr const char* kSliderBrightness = "Brightness";
+    constexpr const char* kSliderPixelThreshold = "Pixel threshold";
     constexpr int kHueHalfWidth = 12;
 
     int tuning_hue_center =
         hueBandMidpoint(dynamicConfig.depthHueLower1, dynamicConfig.depthHueUpper1);
     int tuning_saturation = std::clamp(dynamicConfig.depthSatMin, 0, 255);
     int tuning_brightness = std::clamp(dynamicConfig.depthValMin, 0, 255);
-    const int fixed_pixel_threshold = dynamicConfig.depthPixelThreshold;
+    int tuning_pixel_threshold =
+        std::clamp(dynamicConfig.depthPixelThreshold, 0, 5000);
 
     auto applySimpleColourTuning = [&]() {
         tuning_hue_center = std::clamp(tuning_hue_center, 0, 179);
@@ -3984,6 +3986,10 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         cv::setTrackbarPos(kSliderHue, kLiveStatusWindowName, tuning_hue_center);
         cv::setTrackbarPos(kSliderSaturation, kLiveStatusWindowName, tuning_saturation);
         cv::setTrackbarPos(kSliderBrightness, kLiveStatusWindowName, tuning_brightness);
+        tuning_pixel_threshold = std::clamp(tuning_pixel_threshold, 0, 5000);
+        cv::setTrackbarPos(kSliderPixelThreshold,
+                           kLiveStatusWindowName,
+                           tuning_pixel_threshold);
 
         dynamicConfig.depthHueLower1 =
             normaliseHue(tuning_hue_center - kHueHalfWidth);
@@ -3995,13 +4001,14 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         dynamicConfig.depthSatMax = 255;
         dynamicConfig.depthValMin = tuning_brightness;
         dynamicConfig.depthValMax = 255;
-        dynamicConfig.depthPixelThreshold = fixed_pixel_threshold;
+        dynamicConfig.depthPixelThreshold = tuning_pixel_threshold;
     };
     auto sliderSnapshot = [&]() {
-        return std::array<int, 3>{
+        return std::array<int, 4>{
             tuning_hue_center,
             tuning_saturation,
             tuning_brightness,
+            tuning_pixel_threshold,
         };
     };
 
@@ -4017,10 +4024,14 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
                        kLiveStatusWindowName,
                        &tuning_brightness,
                        255);
+    cv::createTrackbar(kSliderPixelThreshold,
+                       kLiveStatusWindowName,
+                       &tuning_pixel_threshold,
+                       5000);
 
     applySimpleColourTuning();
     vision_processor.updateConfig(dynamicConfig);
-    std::array<int, 3> last_slider_snapshot = sliderSnapshot();
+    std::array<int, 4> last_slider_snapshot = sliderSnapshot();
 
     struct LiveStatusSnapshot {
         bool guardian_armed = false;
@@ -4104,7 +4115,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         (void)control_events.waitForEvents(std::chrono::milliseconds(5));
 
         applySimpleColourTuning();
-        const std::array<int, 3> current_slider_snapshot = sliderSnapshot();
+        const std::array<int, 4> current_slider_snapshot = sliderSnapshot();
         if (current_slider_snapshot != last_slider_snapshot) {
             vision_processor.updateConfig(dynamicConfig);
             last_slider_snapshot = current_slider_snapshot;
