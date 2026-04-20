@@ -223,24 +223,26 @@ ARGUS public channels for demos, build updates, and outreach:
 - LinkedIn: [A.R.G.U.S](https://www.linkedin.com/company/a-r-g-u-s)
 - TikTok: [@argusxisx61](https://www.tiktok.com/@argusxisx61?_r=1&_t=ZN-95E4anYeInm)
   
-## Team
+## Authors & Contributions
+
 | Name | Component Ownership | Key Contributions |
 |------|-------------------|-------------------|
-| Nathan Sidi Bakari | MotionController, AppController | Servo output path, PCA9685 integration, run modes, hardware validation |
-| Patricia Munginga | VisionProcessor | Vision pipeline, colour safety logic, docs |
-| Jui Ning Chin | GuardianStateMachine | FSM logic and transitions |
-| Liyue Tian | CameraCapture | Camera backends and fallback behaviour |
-| Nigar Baghirova | RobotInterlock | Interlock gate and motion enable/disable logic |
+| Nathan Sidi Bakari| MotionController, AppController | Servo output path, PCA9685 driver integration, run modes, CLI interface, hardware wiring |
+| Patricia Munginga | VisionProcessor | Vision safety pipeline, colour detection, Doxygen documentation, PR reviews, social media content |
+| Jui Ning Chin | GuardianStateMachine | FSM design and implementation, state transitions, freeze/recovery logic, social media content|
+| Liyue Tian | CameraCapture | Camera acquisition pipeline, libcamera2opencv integration, V4L2 fallback, social media content |
+| Nigar Baghirova | RobotInterlock | Interlock gate logic, atomic state management, motion enable/disable, social media content|
 
-Project management board:
-- https://github.com/orgs/ENG5220-RTEP-Team-ARGUS/projects
+### Project management
+
+This project is tracked using [GitHub Projects](https://github.com/orgs/ENG5220-RTEP-Team-ARGUS/projects). The project board tracks all issues, bugs and tasks with clear ownership per team member.
 
 ## Acknowledgements
-- Dr Porr and Dr Chongfeng Wei (ENG5220 Real-Time Embedded Programming)
-- Teaching assistants for lab and code guidance
-- Bernd Porr open-source libraries:
-  - [cppTimer](https://github.com/berndporr/cppTimer)
-  - [libcamera2opencv](https://github.com/berndporr/libcamera2opencv)
+
+- **Dr Bernd Porr** and **Dr Chongfeng Wei** - course lecturers, ENG5220 Real-Time Embedded Programming
+- **Teaching assistants** — lab support and coding standard guidance
+- **Bernd Porr's open-source libraries** - [cppTimer](https://github.com/berndporr/cppTimer) and [libcamera2opencv](https://github.com/berndporr/libcamera2opencv), vendored under `third_party/` with GPL licensing
+- **University of Glasgow, School of Engineering** - lab facilities and hardware budget
 
 ## License
 Mixed license model:
