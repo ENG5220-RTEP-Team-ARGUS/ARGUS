@@ -14,7 +14,8 @@ It watches camera input, decides whether the scene is safe, and routes motion th
 
 ## Promotion
 ARGUS public channels for demos, build updates, and outreach:
-- Website: content refresh in progress, source at [gui/argus-app](gui/argus-app)
+- Website: [thewebbutbeyond.github.io/argus](https://thewebbutbeyond.github.io/argus/)
+- Website source: [gui/argus-app](gui/argus-app)
 - Instagram: [@argus102026](https://www.instagram.com/argus102026/)
 - YouTube: [@argus-w3g](https://www.youtube.com/@argus-w3g)
 - LinkedIn: [A.R.G.U.S](https://www.linkedin.com/company/a-r-g-u-s)
