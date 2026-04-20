@@ -192,6 +192,88 @@ std::string formatFocusScore(double focus_score) {
     return oss.str();
 }
 
+int normaliseHue(int hue) {
+    int value = hue % 180;
+    if (value < 0) {
+        value += 180;
+    }
+    return value;
+}
+
+int hueBandMidpoint(int lower, int upper) {
+    const int l = normaliseHue(lower);
+    const int u = normaliseHue(upper);
+    if (l <= u) {
+        return (l + u) / 2;
+    }
+
+    const int wrapped_span = (u + 180) - l;
+    return normaliseHue(l + (wrapped_span / 2));
+}
+
+std::string describeHueBand(int lower, int upper) {
+    const int l = normaliseHue(lower);
+    const int u = normaliseHue(upper);
+    if (l <= u) {
+        return std::to_string(l) + "-" + std::to_string(u);
+    }
+    return std::to_string(l) + "-179 + 0-" + std::to_string(u);
+}
+
+std::string hueFamilyName(int hue_midpoint) {
+    const int h = normaliseHue(hue_midpoint);
+    if (h <= 8 || h >= 170) {
+        return "Red";
+    }
+    if (h <= 20) {
+        return "Orange";
+    }
+    if (h <= 34) {
+        return "Yellow";
+    }
+    if (h <= 85) {
+        return "Green";
+    }
+    if (h <= 100) {
+        return "Cyan";
+    }
+    if (h <= 130) {
+        return "Blue";
+    }
+    if (h <= 145) {
+        return "Purple";
+    }
+    return "Pink/Magenta";
+}
+
+std::string describeForbiddenColour(const VisionConfig& config) {
+    const int hue_mid = hueBandMidpoint(config.depthHueLower1, config.depthHueUpper1);
+    return hueFamilyName(hue_mid);
+}
+
+std::string describeForbiddenColourThresholds(const VisionConfig& config) {
+    return "H " + describeHueBand(config.depthHueLower1, config.depthHueUpper1) +
+           " | S " + std::to_string(config.depthSatMin) + "-" +
+           std::to_string(config.depthSatMax) + " | V " +
+           std::to_string(config.depthValMin) + "-" +
+           std::to_string(config.depthValMax) + " | px >= " +
+           std::to_string(config.depthPixelThreshold);
+}
+
+cv::Scalar forbiddenColourSwatchBgr(const VisionConfig& config) {
+    const int hue = hueBandMidpoint(config.depthHueLower1, config.depthHueUpper1);
+    const int sat =
+        std::clamp((config.depthSatMin + config.depthSatMax) / 2, 0, 255);
+    const int val =
+        std::clamp((config.depthValMin + config.depthValMax) / 2, 0, 255);
+
+    cv::Mat hsv(1, 1, CV_8UC3, cv::Scalar(hue, sat, val));
+    cv::Mat bgr;
+    cv::cvtColor(hsv, bgr, cv::COLOR_HSV2BGR);
+    const cv::Vec3b pixel = bgr.at<cv::Vec3b>(0, 0);
+    return cv::Scalar(pixel[0], pixel[1], pixel[2]);
+}
+
 struct RuntimeLatencyMetrics {
     long long vision_us = 0;
     std::optional<long long> unsafe_detect_ms;
@@ -475,6 +557,9 @@ struct SupervisoryUiModel {
     std::vector<double> total_stop_history_ms;
     std::vector<double> ack_resume_history_ms;
     std::vector<SupervisoryUiRow> status_rows;
+    std::string forbidden_colour_label;
+    std::string forbidden_colour_thresholds;
+    cv::Scalar forbidden_colour_swatch = cv::Scalar(150, 150, 150);
     bool show_focus = false;
     std::string focus_label;
     cv::Scalar focus_color;
@@ -1409,6 +1494,35 @@ void drawStatusDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
                                                   : muted_text,
                              1);
              });
+
+    drawCard(72, panel_border, [&](int x, int y0) {
+        cv::putText(frame,
+                    "Forbidden colour",
+                    cv::Point(x + 10, y0 + 15),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.34,
+                    muted_text,
+                    1);
+        drawPanel(frame,
+                  cv::Point(x + 10, y0 + 24),
+                  cv::Point(x + 44, y0 + 54),
+                  model.forbidden_colour_swatch,
+                  panel_border);
+        cv::putText(frame,
+                    model.forbidden_colour_label,
+                    cv::Point(x + 54, y0 + 39),
+                    uiPlainFontFace(),
+                    0.95,
+                    primary_text,
+                    1);
+        cv::putText(frame,
+                    model.forbidden_colour_thresholds,
+                    cv::Point(x + 10, y0 + 66),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.29,
+                    muted_text,
+                    1);
+    });
 
     int rx = card_margin + 2;
     int ry = card_y + 12;
@@ -3848,47 +3962,65 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
     cv::namedWindow(kLiveCameraWindowName, cv::WINDOW_AUTOSIZE);
     cv::namedWindow(kLiveStatusWindowName, cv::WINDOW_AUTOSIZE);
 
-    // Add dynamic colour tuning sliders to the status window
-    // Allows real-time adjustment of forbidden colour detection under varying lighting
-    VisionConfig dynamicConfig = vision_config;  // Copy for slider modifications
-    auto updateVisionConfig = [&]() {
-        vision_processor.updateConfig(dynamicConfig);
+    // Add simplified colour tuning sliders to the status window.
+    // Three controls only: hue, saturation, brightness.
+    VisionConfig dynamicConfig = vision_config;
+    constexpr const char* kSliderHue = "Hue";
+    constexpr const char* kSliderSaturation = "Saturation";
+    constexpr const char* kSliderBrightness = "Brightness";
+    constexpr int kHueHalfWidth = 12;
+
+    int tuning_hue_center =
+        hueBandMidpoint(dynamicConfig.depthHueLower1, dynamicConfig.depthHueUpper1);
+    int tuning_saturation = std::clamp(dynamicConfig.depthSatMin, 0, 255);
+    int tuning_brightness = std::clamp(dynamicConfig.depthValMin, 0, 255);
+    const int fixed_pixel_threshold = dynamicConfig.depthPixelThreshold;
+
+    auto applySimpleColourTuning = [&]() {
+        tuning_hue_center = std::clamp(tuning_hue_center, 0, 179);
+        tuning_saturation = std::clamp(tuning_saturation, 0, 255);
+        tuning_brightness = std::clamp(tuning_brightness, 0, 255);
+
+        cv::setTrackbarPos(kSliderHue, kLiveStatusWindowName, tuning_hue_center);
+        cv::setTrackbarPos(kSliderSaturation, kLiveStatusWindowName, tuning_saturation);
+        cv::setTrackbarPos(kSliderBrightness, kLiveStatusWindowName, tuning_brightness);
+
+        dynamicConfig.depthHueLower1 =
+            normaliseHue(tuning_hue_center - kHueHalfWidth);
+        dynamicConfig.depthHueUpper1 =
+            normaliseHue(tuning_hue_center + kHueHalfWidth);
+        dynamicConfig.depthHueLower2 = 255;
+        dynamicConfig.depthHueUpper2 = 0;
+        dynamicConfig.depthSatMin = tuning_saturation;
+        dynamicConfig.depthSatMax = 255;
+        dynamicConfig.depthValMin = tuning_brightness;
+        dynamicConfig.depthValMax = 255;
+        dynamicConfig.depthPixelThreshold = fixed_pixel_threshold;
+    };
+    auto sliderSnapshot = [&]() {
+        return std::array<int, 3>{
+            tuning_hue_center,
+            tuning_saturation,
+            tuning_brightness,
+        };
     };
 
-    cv::createTrackbar("Hue Lower", kLiveStatusWindowName, &dynamicConfig.depthHueLower1, 179, [](int, void* userdata) {
-        auto* updater = static_cast<std::function<void()>*>(userdata);
-        (*updater)();
-    }, &updateVisionConfig);
+    cv::createTrackbar(kSliderHue,
+                       kLiveStatusWindowName,
+                       &tuning_hue_center,
+                       179);
+    cv::createTrackbar(kSliderSaturation,
+                       kLiveStatusWindowName,
+                       &tuning_saturation,
+                       255);
+    cv::createTrackbar(kSliderBrightness,
+                       kLiveStatusWindowName,
+                       &tuning_brightness,
+                       255);
 
-    cv::createTrackbar("Hue Upper", kLiveStatusWindowName, &dynamicConfig.depthHueUpper1, 179, [](int, void* userdata) {
-        auto* updater = static_cast<std::function<void()>*>(userdata);
-        (*updater)();
-    }, &updateVisionConfig);
-
-    cv::createTrackbar("Sat Min", kLiveStatusWindowName, &dynamicConfig.depthSatMin, 255, [](int, void* userdata) {
-        auto* updater = static_cast<std::function<void()>*>(userdata);
-        (*updater)();
-    }, &updateVisionConfig);
-
-    cv::createTrackbar("Sat Max", kLiveStatusWindowName, &dynamicConfig.depthSatMax, 255, [](int, void* userdata) {
-        auto* updater = static_cast<std::function<void()>*>(userdata);
-        (*updater)();
-    }, &updateVisionConfig);
-
-    cv::createTrackbar("Val Min", kLiveStatusWindowName, &dynamicConfig.depthValMin, 255, [](int, void* userdata) {
-        auto* updater = static_cast<std::function<void()>*>(userdata);
-        (*updater)();
-    }, &updateVisionConfig);
-
-    cv::createTrackbar("Val Max", kLiveStatusWindowName, &dynamicConfig.depthValMax, 255, [](int, void* userdata) {
-        auto* updater = static_cast<std::function<void()>*>(userdata);
-        (*updater)();
-    }, &updateVisionConfig);
-
-    cv::createTrackbar("Pixel Thresh", kLiveStatusWindowName, &dynamicConfig.depthPixelThreshold, 5000, [](int, void* userdata) {
-        auto* updater = static_cast<std::function<void()>*>(userdata);
-        (*updater)();
-    }, &updateVisionConfig);
+    applySimpleColourTuning();
+    vision_processor.updateConfig(dynamicConfig);
+    std::array<int, 3> last_slider_snapshot = sliderSnapshot();
 
     struct LiveStatusSnapshot {
         bool guardian_armed = false;
@@ -3970,6 +4102,13 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
             break;
         }
         (void)control_events.waitForEvents(std::chrono::milliseconds(5));
+
+        applySimpleColourTuning();
+        const std::array<int, 3> current_slider_snapshot = sliderSnapshot();
+        if (current_slider_snapshot != last_slider_snapshot) {
+            vision_processor.updateConfig(dynamicConfig);
+            last_slider_snapshot = current_slider_snapshot;
+        }
 
         std::string guardian_state_text = "DISARMED_SETUP";
         std::string interlock_state_text = "DISARMED";
@@ -4094,6 +4233,10 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
             guardian_armed ? freezeReasonToUiString(interlock_freeze_reason) : "N/A";
         live_ui.footer_info = footer_info;
         live_ui.latency = latency_metrics;
+        live_ui.forbidden_colour_label = describeForbiddenColour(dynamicConfig);
+        live_ui.forbidden_colour_thresholds =
+            describeForbiddenColourThresholds(dynamicConfig);
+        live_ui.forbidden_colour_swatch = forbiddenColourSwatchBgr(dynamicConfig);
         live_ui.vision_latency_history_us = copyHistory(vision_us_history);
         live_ui.unsafe_detect_history_ms = copyHistory(unsafe_detect_history_ms);
         live_ui.freeze_pipeline_history_ms =
