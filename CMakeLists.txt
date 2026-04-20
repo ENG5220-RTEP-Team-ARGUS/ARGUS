@@ -77,3 +77,6 @@ if(ARGUS_ENABLE_LIBCAMERA2OPENCV)
                 "libturbojpeg). Falling back to the OpenCV/V4L2 path.")
     endif()
 endif()
+
+enable_testing()
+add_subdirectory(tests)

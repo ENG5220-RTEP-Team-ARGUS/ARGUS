@@ -98,6 +98,8 @@ void MetricsLogger::processLogs() {
             lock.lock();
         }
 
+        queueCV.notify_all();
+
         // Flush file periodically
         if (logFile.is_open()) {
             logFile.flush();
@@ -106,12 +108,9 @@ void MetricsLogger::processLogs() {
 }
 
 void MetricsLogger::flush() {
-    // Wait for queue to empty
-    while (true) {
-        std::lock_guard<std::mutex> lock(queueMutex);
-        if (logQueue.empty()) break;
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
+    std::unique_lock<std::mutex> lock(queueMutex);
+    queueCV.wait(lock, [this] { return logQueue.empty(); });
+    lock.unlock();
 
     if (logFile.is_open()) {
         logFile.flush();

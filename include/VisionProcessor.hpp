@@ -3,8 +3,8 @@
  * @brief Vision safety evaluator for the ARGUS pipeline.
  *
  * VisionProcessor is responsible for one thing only: given a camera frame
- * and its capture timestamp, detect the expected ArUco marker and evaluate
- * whether the current state of the tool is safe.
+ * and its capture timestamp, evaluate whether the forbidden depth-layer
+ * colour is visible in the configured ROI.
  *
  * @par Design - Single Responsibility Principle
  * This class does exactly one thing: vision-based safety evaluation.
@@ -19,9 +19,7 @@
  *
  * @par Thread Safety
  * Not thread-safe. process() must only be called from a single thread
- * (the realtime safety thread). Inter-frame state (previousPosition_,
- * hasPrevious_, lastTimestamp_) is plain - no atomics required as long
- * as this constraint is respected.
+ * (the realtime safety thread).
  */
 
 #pragma once
@@ -43,9 +41,8 @@ public:
     /**
      * @brief Constructs a VisionProcessor with the given safety configuration.
      *
-     * Initialises the ArUco dictionary, detector parameters, and ArucoDetector
-     * once at construction so that process() stays fast and its latency remains
-     * predictable and bounded on every call.
+     * Initialises internal resources once at construction so that process()
+     * stays fast and latency remains predictable and bounded on every call.
      *
      * The config is stored by value so this class owns its own copy and is
      * not affected by any external changes after construction — satisfying
@@ -56,10 +53,6 @@ public:
      *               construction. Stored by value to prevent external
      *               modifications from affecting in-flight decisions.
      *
-     * @note TODO: verify OpenCV version on Raspberry Pi before deployment.
-     *       Current code uses OpenCV 4.7+ API (Dictionary by value).
-     *       If Pi has OpenCV < 4.7, revert dictionary_ to cv::Ptr<cv::aruco::Dictionary>.
-     *       Check with: pkg-config --modversion opencv4
      */
     explicit VisionProcessor(const VisionConfig& config);
 
@@ -68,16 +61,11 @@ public:
     /**
      * @brief Processes a single camera frame and evaluates tool safety.
      *
-     * Executes a seven-stage pipeline per frame:
-     *   1. Detect all ArUco markers in the frame.
-     *   2. Early exit if no markers are detected (TOOL_NOT_DETECTED).
-     *   3. Find the expected marker ID - reject foreign markers.
-     *   4. Compute the marker centroid from its four corner points.
-     *   5. Safe zone check - centroid must lie within configured bounds.
-     *   6. Speed check - pixel displacement per second must not exceed
-     *      config_.maxSpeed. Uses actual elapsed time from captureTimestamp
-     *      to correctly handle variable frame delivery rates (frame jitter).
-     *   7. Orientation check - marker angle must be within configured range.
+     * Executes a depth-colour safety pipeline per frame:
+     *   1. Crop frame to the configured safe-zone ROI.
+     *   2. Convert ROI to HSV colour space.
+     *   3. Apply configured hue/saturation/value thresholds.
+     *   4. Trigger DEPTH_EXCEEDED when matching pixels exceed threshold.
      *
      * Must complete within the latency budget (less than one frame period).
      * At 30 FPS the budget is ~33 ms; target completion under 20 ms to leave
@@ -90,8 +78,7 @@ public:
      *                         results caused by dropped frames under load.
      *
      * @return SafetyResult containing:
-     *         - The safety state (SAFE, TOOL_NOT_DETECTED, OUTSIDE_ALLOWED_ZONE,
-     *           EXCESSIVE_SPEED, or INVALID_ORIENTATION).
+     *         - The safety state (SAFE or DEPTH_EXCEEDED on this branch).
      *         - The timestamp at which the result was produced.
      *         - The processing duration for latency budget analysis.
      */
@@ -122,25 +109,22 @@ private:
      */
     VisionConfig config_;
 
-    // ArUco Detection Members
+    // Reserved marker-detection members (currently inactive on this branch)
     //
-    // All detection resources are initialised once in the constructor to avoid
-    // repeated heap allocation on every frame — keeps process() fast and
-    // processing time predictable.
+    // Kept only for compatibility with marker-based configurations.
 
     /**
-     * @brief The ArUco marker dictionary used for detection.
+     * @brief Reserved marker dictionary.
      *
      * Determined by config_.dictionaryId and created once at construction.
      * DICT_6X6_250 provides high inter-marker distance, reducing false
      * positives — important in a safety-critical context.
      *
-     * @note If OpenCV < 4.7, revert to cv::Ptr<cv::aruco::Dictionary>.
      */
     cv::aruco::Dictionary dictionary_;
 
     /**
-     * @brief Tunable detector parameters (thresholding, contour filtering etc.).
+     * @brief Reserved marker detector parameters.
      *
      * Default parameters are used unless overridden via config in future.
      * Constructed once — not per frame.
@@ -148,7 +132,7 @@ private:
     cv::aruco::DetectorParameters detectorParams_;
 
     /**
-     * @brief The ArUco detector instance.
+     * @brief Reserved marker detector instance.
      *
      * Wraps dictionary_ and detectorParams_ into a single reusable object
      * (OpenCV 4.7+ API). Constructed once at construction to keep
@@ -156,42 +140,25 @@ private:
      */
     cv::aruco::ArucoDetector detector_;
 
-    // Inter-frame State
-    //
-    // Only the minimum state required between frames is retained.
-    // All other processing is stateless per-frame.
+    // Reserved inter-frame members from marker pipeline (currently inactive)
 
     /**
-     * @brief Centroid position of the marker in the previous valid frame.
-     *
-     * Used to compute pixel displacement per second for the speed check.
-     * Only valid when hasPrevious_ is true.
+     * @brief Reserved previous marker centroid.
      */
     cv::Point2f previousPosition_;
 
     /**
-     * @brief Whether a valid previous position exists for speed computation.
-     *
-     * Set to false on first frame and after any non-SAFE result to prevent
-     * a false EXCESSIVE_SPEED on the first detection after a gap.
+     * @brief Reserved previous-marker availability flag.
      */
     bool hasPrevious_ = false;
 
     /**
-     * @brief Timestamp of the last successfully processed frame.
-     *
-     * Used to compute the actual inter-frame elapsed time in the speed check,
-     * ensuring correctness under variable frame delivery rates on a loaded RPi.
-     * Zero-initialised — the speed check falls back to 1/30 s on the first frame.
+     * @brief Reserved previous timestamp from marker-speed checks.
      */
     std::chrono::steady_clock::time_point lastTimestamp_{};
 
     /**
-     * @brief Reusable buffer for ArUco marker candidates rejected during detection.
-     *
-     * Required by the OpenCV detectMarkers() API but never inspected here.
-     * Promoted to a member variable to avoid a heap allocation on every frame
-     * at 30 FPS - cleared implicitly by detectMarkers() on each call.
+     * @brief Reserved buffer for rejected marker candidates.
      */
     mutable std::vector<std::vector<cv::Point2f>> rejected_;
 };

@@ -20,10 +20,9 @@ At the same time, the module references provided by Bernd Porr represent the
 expected realtime/event-driven style for ENG5220 RTEP. ARGUS is only partially
 aligned with that style today. In particular:
 
-- `src/AppController.cpp` still uses `std::this_thread::sleep_for(...)`
-- top-level control remains polling-heavy
-- `src/CameraCapture.cpp` uses OpenCV `VideoCapture` instead of a callback-first
-  libcamera wrapper
+- top-level control is still loop-driven in `src/AppController.cpp`
+- camera/backend flow still relies on mixed callback + loop orchestration
+- `src/CameraCapture.cpp` still keeps an OpenCV fallback path for robustness
 
 We need a compliance path that improves alignment without destabilizing the
 working system or redesigning the current architecture.
