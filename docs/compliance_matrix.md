@@ -14,7 +14,7 @@ ARGUS currently has a working Raspberry Pi hardware path:
 
 - `AppController` orchestrates the application flow.
 - `CameraCapture` provides live frames.
-- `VisionProcessor` evaluates ArUco-based safety.
+- `VisionProcessor` evaluates colour-depth safety for forbidden layer exposure.
 - `GuardianStateMachine` decides freeze/recovery state.
 - `RobotInterlock` gates motion.
 - `MotionController` drives a PCA9685-backed MeArm path.
@@ -146,4 +146,4 @@ Licensing and attribution for those components is documented in
 
 1. Run `scripts/camera_backend_check.sh` on the Pi and collect backend/frame summary evidence.
 2. Re-run `scripts/live_test.sh` and `scripts/full_demo.sh` on the Pi to confirm the queued timer/button event flow remains stable.
-3. Continue reducing loop-centric frame progression while keeping the current architecture and fallback paths intact.
+3. Continue reducing loop-centric frame progression while keeping the current architecture and fallback paths intact, with watchdog checks enabled during live control.

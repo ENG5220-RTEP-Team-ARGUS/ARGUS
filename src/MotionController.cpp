@@ -1,9 +1,12 @@
 #include "MotionController.hpp"
+#include "CppTimerStdFuncCallback.h"
 
 #include <array>
 #include <cmath>
+#include <condition_variable>
 #include <cstdint>
 #include <fcntl.h>
+#include <mutex>
 #include <sys/ioctl.h>
 #include <unistd.h>
 
@@ -25,6 +28,36 @@ constexpr float kPca9685OscillatorHz = 25000000.0f;
 constexpr std::uint8_t kMinimumPrescale = 3;
 constexpr std::uint8_t kMaximumPrescale = 255;
 constexpr useconds_t kWakeDelayUs = 5000;
+
+bool waitForWakeDelay(useconds_t delay_us) noexcept {
+    if (delay_us == 0U) {
+        return true;
+    }
+
+    std::mutex mutex;
+    std::condition_variable condition;
+    bool fired = false;
+
+    CppTimerCallback timer;
+    timer.registerEventCallback([&]() {
+        std::lock_guard<std::mutex> lock(mutex);
+        fired = true;
+        condition.notify_one();
+    });
+
+    const std::uint64_t delay_ns =
+        static_cast<std::uint64_t>(delay_us) * 1000ULL;
+    try {
+        timer.startns(static_cast<long>(delay_ns), ONESHOT);
+    } catch (...) {
+        return false;
+    }
+
+    std::unique_lock<std::mutex> lock(mutex);
+    condition.wait(lock, [&]() { return fired; });
+    timer.stop();
+    return true;
+}
 }  // namespace
 
 MotionController::MotionController() noexcept
@@ -250,7 +283,10 @@ bool MotionController::configurePca9685(float pwm_frequency_hz) noexcept {
         return false;
     }
 
-    ::usleep(kWakeDelayUs);
+    if (!waitForWakeDelay(kWakeDelayUs)) {
+        return false;
+    }
+
     return true;
 }
 

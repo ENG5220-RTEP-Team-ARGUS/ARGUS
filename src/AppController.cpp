@@ -21,6 +21,7 @@
 #include <iomanip>
 #include <iostream>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -88,6 +89,7 @@ constexpr int kSurgeryPassOneDepthOffset = -12;
 constexpr int kSurgeryPassTwoDepthOffset = -24;
 constexpr int kSurgeryPassThreeDepthOffset = -36;
 constexpr int kSurgeryGripHoldOffset = 90;
+constexpr std::uint32_t kLiveInterlockWatchdogMaxDelayMs = 1000;
 
 class MotionControllerHardwareAdapter final : public RobotHardware {
 public:
@@ -3803,6 +3805,16 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
     FrameEvent latest_frame_event;
     bool latest_frame_available = false;
     std::uint64_t frame_index = 0;
+    const auto live_watchdog_clock_start = std::chrono::steady_clock::now();
+    auto liveWatchdogTickMs = [&]() -> std::uint32_t {
+        const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - live_watchdog_clock_start)
+                                    .count();
+        const auto clamped_ms = std::min<std::uint64_t>(
+            static_cast<std::uint64_t>(elapsed_ms),
+            static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max()));
+        return static_cast<std::uint32_t>(clamped_ms);
+    };
     bool processed_any_frame = false;
     int consecutive_capture_failures = 0;
     double focus_score = 0.0;
@@ -3919,8 +3931,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
                 }
 
                 if (guardian_armed) {
-                    interlock->guardianHeartbeat(
-                        static_cast<std::uint32_t>(frame_index));
+                    interlock->guardianHeartbeat(liveWatchdogTickMs());
                 }
 
                 return ControllerEventDisposition::Consumed;
@@ -4113,6 +4124,20 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         if (!control_events.drain(handleControlEvent)) {
             motion_faulted = true;
             break;
+        }
+
+        if (guardian_armed) {
+            interlock->watchdogCheck(liveWatchdogTickMs(),
+                                     kLiveInterlockWatchdogMaxDelayMs);
+            if (interlock->state() == InterlockState::FROZEN &&
+                interlock->freezeReason() == FreezeReason::WATCHDOG_TIMEOUT) {
+                motion_faulted = true;
+                std::cerr << "[LIVE_TEST] Watchdog timeout: no guardian heartbeat "
+                             "observed in "
+                          << kLiveInterlockWatchdogMaxDelayMs
+                          << " ms. Aborting run." << std::endl;
+                break;
+            }
         }
 
         if (!advancePoseSlew()) {

@@ -3,13 +3,13 @@
  * @brief Thread-safe, non-blocking logging system for real-time applications
  *
  * This logger provides non-blocking, thread-safe logging suitable for
- * real-time systems. It uses a lock-free queue and background thread
- * to ensure logging never blocks the critical safety path.
+ * real-time systems. It uses a mutex-protected queue and background thread
+ * to keep I/O off the critical safety path.
  *
  * @section design_rationale Design Rationale
  * - Singleton Pattern: Single global logger instance
  * - Producer-Consumer: Main thread produces logs, background thread consumes
- * - Lock-Free Queue: No mutex contention on critical path
+ * - Mutex-protected queue: bounded lock scope on enqueue/dequeue
  * - Non-Blocking: logEvent() returns immediately
  */
 
@@ -32,7 +32,7 @@
  * @brief Singleton logger with non-blocking, thread-safe operation
  *
  * **Thread Safety:**
- * - logEvent() is lock-free for the caller (uses atomic queue)
+ * - logEvent() is thread-safe for the caller (short mutex-protected enqueue)
  * - Background thread handles actual I/O
  * - No blocking on critical safety path
  */
