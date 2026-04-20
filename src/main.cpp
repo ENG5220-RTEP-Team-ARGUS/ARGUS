@@ -34,7 +34,16 @@ void printUsage(const char* program_name) {
         << "  --expected-marker-id <n>  Expected ArUco marker ID (default: 23)\n"
         << "  --camera-backend <name>   Camera backend: auto, libcamera2opencv, or opencv (default: auto)\n"
         << "  --auto-ack                Auto-send operator acknowledge when frozen\n"
-        << "  --help                    Show this message\n";
+        << "  --help                    Show this message\n"
+        << "\nLive-test controls:\n"
+        << "  space/button              Operator acknowledge\n"
+        << "  0/1/2/3                   Select mode/routine\n"
+        << "  d/a                       Base left/right\n"
+        << "  w/s                       Forward/backward\n"
+        << "  i/k                       Up/down\n"
+        << "  l/j                       Open/close gripper\n"
+        << "  +/-                       Adjust camera focus (Pi Camera Module 3 only, -=autofocus)\n"
+        << "  esc                       Quit\n";
 }
 
 bool parseSmokeJointFlag(const std::string& arg, AppController::SmokeJoint& joint) {

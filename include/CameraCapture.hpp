@@ -26,6 +26,7 @@ public:
     struct Options {
         int camera_index = 0;
         BackendPreference backend_preference = BackendPreference::Auto;
+        float focus_position = -1.0f;  // -1.0 = autofocus, 0.0 = closest, 1.0 = farthest
     };
 
     // Initializes the camera using the specified device index.
@@ -53,7 +54,15 @@ public:
 
     BackendPreference backendPreference() const noexcept;
 
+    // Sets the focus position for cameras that support manual focus (e.g., Pi Camera Module 3).
+    // position: -1.0 = autofocus, 0.0 = closest, 1.0 = farthest
+    bool setFocusPosition(float position);
+
+    // Gets the current focus position.
+    float getFocusPosition() const;
+
 private:
     std::unique_ptr<CameraCaptureBackend> backend_;
     BackendPreference backend_preference_;
+    float current_focus_position_ = -1.0f;
 };

@@ -675,7 +675,7 @@ So in this project the latency numbers should be described as software or
 command latency unless external measurement hardware is added.
 
 ### Current runtime notes
-- live test freezes after `30` consecutive bad frames and recovers after `3` good frames
+- live test freezes after `15` consecutive bad frames and recovers after `3` good frames
 - live test shows focus score and safety overlays to support setup and debugging
 - live test now shows these software-side latency values directly in the GUI:
   - `vision_us`

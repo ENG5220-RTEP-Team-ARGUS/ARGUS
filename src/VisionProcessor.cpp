@@ -47,6 +47,21 @@ VisionProcessor::VisionProcessor(const VisionConfig& config)
       detector_(dictionary_, detectorParams_)
 {}
 
+// updateConfig()
+
+/**
+ * @brief Updates the safety configuration at runtime.
+ *
+ * Allows dynamic adjustment of thresholds (e.g., via UI sliders) without
+ * reconstructing the VisionProcessor. Useful for calibration and testing
+ * under varying lighting conditions.
+ *
+ * @param newConfig The updated configuration to apply.
+ */
+void VisionProcessor::updateConfig(const VisionConfig& newConfig) {
+    config_ = newConfig;
+}
+
 // process()
 
 /**
