@@ -30,8 +30,11 @@
 ## Overview
 <p align="justify"> A.R.G.U.S (Adaptive Real-Time Guardian for Unsafe Situations) is a real-time, vision-based safety system for robotic manipulators, designed for high-risk environments such as surgical robotics and industrial automation. It continuously monitors the workspace - particularly during critical operations like instrument exchange - where unexpected motion can cause damage or injury. By analysing visual input under strict latency constraints, A.R.G.U.S. detects deviations from expected conditions and immediately triggers fail-safe interventions (e.g. hard stops) using event-driven control. This ensures deterministic, reliable interruption of motion, preventing accidents before they occur.</p>
 
-![ARGUS wiring and bench architecture](docs/architecture/Wiring_Diagram_v1.png)
-*Validated bench wiring used for the current Raspberry Pi hardware baseline.*
+<p align="center">
+  <img src="docs/images/argus-1.png" width="48%" alt="ARGUS bench setup view 1"/>
+  <img src="docs/images/argus-2.png" width="48%" alt="ARGUS bench setup view 2"/>
+</p>
+*Validated ARGUS bench setup on Raspberry Pi 5 with Pi Camera, PCA9685 and MeArm platform.*
 
 ### Current validated implementation
 This branch is the first fully working Raspberry Pi hardware baseline for ARGUS. The currently validated runtime path is:
