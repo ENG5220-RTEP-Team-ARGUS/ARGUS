@@ -193,7 +193,7 @@ sudo apt update
 sudo apt install -y build-essential cmake pkg-config libopencv-dev libcamera-tools
 ```
 
-### Bundled Bernd compliance backend packages
+### Bundled Bernd Porr compliance backend packages
 To build the bundled `libcamera2opencv` backend in this repo:
 ```bash
 sudo apt install -y libcamera-dev libturbojpeg0-dev
@@ -212,9 +212,9 @@ cmake --build build -j$(nproc)
 - `live_test.sh` self-elevates with `sudo` because the physical button uses the GPIO character-device interface
 - `--expected-marker-id` is kept as a legacy CLI flag for compatibility
 - the project vendors Bernd Porr `cppTimer` and `libcamera2opencv` under `third_party/`
-- in auto mode, camera capture now tries the bundled Bernd backend first and
+- in auto mode, camera capture now tries the bundled Bernd Porr backend first and
   falls back to the older OpenCV/V4L2 path only if that fails
-- you can force the Bernd camera backend with:
+- you can force the Bernd Porr camera backend with:
   `ARGUS_CAMERA_BACKEND=libcamera2opencv`
 - third-party licensing and attribution are documented in
   [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
@@ -794,7 +794,7 @@ Key project management practices:
 
 ## Acknowledgements
 
-- **Dr Bernd Porr** and **Dr Chongfeng Wei** - course lecturers, ENG5220 Real-Time Embedded Programming
+- **Dr Porr** and **Dr Chongfeng Wei** - course lecturers, ENG5220 Real-Time Embedded Programming
 - **Teaching assistants** — lab support and coding standard guidance
 - **Bernd Porr's open-source libraries** - [cppTimer](https://github.com/berndporr/cppTimer) and [libcamera2opencv](https://github.com/berndporr/libcamera2opencv), vendored under `third_party/` with GPL licensing
 - **University of Glasgow, School of Engineering** - lab facilities and hardware budget
