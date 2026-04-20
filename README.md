@@ -17,19 +17,26 @@ It watches camera input, decides whether the scene is safe, and routes motion th
 ### Controller
 | Component | Quantity | Cost (£) |
 |----------|---------|----------|
-| Raspberry Pi 5 | 1 | Not tracked in repo |
+| Raspberry Pi 5 | 1 | Free |
 
 ### Sensors & Vision
 | Component | Quantity | Cost (£) |
 |----------|---------|----------|
-| Raspberry Pi Camera Module | 1 | Not tracked in repo |
+| Raspberry Pi Camera Module | 1 | Free |
 
 ### Additional Components
 | Component | Quantity | Cost (£) |
 |----------|---------|----------|
-| MeArm test platform | 1 | Not tracked in repo |
+| MeArm Maker Kit V3 | 1 | £47 |
+| Adafruit PCA9685 | 1 | £14.40 |
+| Raspberry Pi Power Supply | 1 | £11.50 |
+| Tactile Switch Button | 1 | Free |
+| 6V AA Batteries | 1 | Free |
+| Breadboard | 1 | Free |
+| Jumper Wires | 1 | Free |
+| 3D Printed Tools | 2 | Free |
 
-**Total Cost:** Not tracked in the repository.
+**Total Cost:** £72.90
 
 ### Current validated bench hardware
 | Component | Quantity | Notes |
