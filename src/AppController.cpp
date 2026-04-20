@@ -3976,7 +3976,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
     int tuning_saturation = std::clamp(dynamicConfig.depthSatMin, 0, 255);
     int tuning_brightness = std::clamp(dynamicConfig.depthValMin, 0, 255);
     int tuning_pixel_threshold =
-        std::clamp(dynamicConfig.depthPixelThreshold, 0, 5000);
+        std::clamp(dynamicConfig.depthPixelThreshold, 0, 500);
 
     auto applySimpleColourTuning = [&]() {
         tuning_hue_center = std::clamp(tuning_hue_center, 0, 179);
@@ -3986,7 +3986,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         cv::setTrackbarPos(kSliderHue, kLiveStatusWindowName, tuning_hue_center);
         cv::setTrackbarPos(kSliderSaturation, kLiveStatusWindowName, tuning_saturation);
         cv::setTrackbarPos(kSliderBrightness, kLiveStatusWindowName, tuning_brightness);
-        tuning_pixel_threshold = std::clamp(tuning_pixel_threshold, 0, 5000);
+        tuning_pixel_threshold = std::clamp(tuning_pixel_threshold, 0, 500);
         cv::setTrackbarPos(kSliderPixelThreshold,
                            kLiveStatusWindowName,
                            tuning_pixel_threshold);
@@ -4027,7 +4027,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
     cv::createTrackbar(kSliderPixelThreshold,
                        kLiveStatusWindowName,
                        &tuning_pixel_threshold,
-                       5000);
+                       500);
 
     applySimpleColourTuning();
     vision_processor.updateConfig(dynamicConfig);
