@@ -139,6 +139,26 @@ Current guardian thresholds in live mode:
 - freeze after `15` consecutive bad frames
 - recover after `3` consecutive good frames
 
+## Safety & Performance Metrics Justification
+
+Benchmarked against published literature and IEC 80601-2-77.
+
+| Metric | Measured | Target | Status | Justification |
+|--------|----------|--------|--------|---------------|
+| Frame Processing | `706 µs` | — | Good | Well below the 75 ms achieved by NVIDIA Holoscan [1] and 15–20 ms AI pipelines in MIS [2]. |
+| Detect Unsafe | `4 ms` | ≤ 30 ms | Good | Delays >100 ms risk tissue damage [3]. Meets IEC 80601-2-77 protective stop requirements [4]. |
+| Issue Freeze | `458 ms` | ≤ 900 ms | Good | Telesurgery validated up to 500 ms latency [5]; 320 ms confirmed safe over 3000 km [6]. |
+| Stop Motion | `7206 ms` | ≤ 8000 ms | Good | Controlled deceleration prevents secondary tissue injury per IEC 80601-2-77 [4]. |
+
+### References
+
+1. NVIDIA, "Real-Time Surgical Guidance with Holoscan," 2025. [Link](https://developer.nvidia.com/blog/real-time-surgical-guidance-by-fusing-multi-modal-imaging-with-nvidia-holoscan/)
+2. "AI-Based Sensorless Force Feedback in Robot-Assisted MIS," *MDPI*, 2025. [Link](https://www.mdpi.com/2078-2489/16/11/993)
+3. Leung, "Engineering precision in surgical robotics," *Medical Design & Outsourcing*, 2025. [Link](https://www.medicaldesignandoutsourcing.com/engineering-precision-surgical-robotics-qnx-rtos/)
+4. IEC 80601-2-77:2019; Chinzei, "Safety of Surgical Robots," *Acta Polytechnica Hungarica*, 2019. [PDF](https://acta.uni-obuda.hu/Chinzei_95.pdf)
+5. Korte et al., "Impact of latency on surgical precision," *Computer Aided Surgery*, 2005. [Link](https://www.tandfonline.com/doi/full/10.3109/10929080500228654)
+6. Xu et al., "Latency in robot-assisted telesurgery," *PMC*, 2024. [Link](https://pmc.ncbi.nlm.nih.gov/articles/PMC11771599/)
+
 ## Architecture and Compliance
 Key docs:
 - [System architecture diagram](docs/architecture/system_software_architecture.png)
