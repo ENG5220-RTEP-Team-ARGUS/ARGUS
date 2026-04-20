@@ -190,6 +190,8 @@ public:
     virtual bool waitForNextFrame(FrameEvent& output_event) = 0;
     virtual std::string backendName() const = 0;
     virtual std::string backendImplementation() const = 0;
+    virtual bool setFocusPosition(float position) { return false; }
+    virtual float getFocusPosition() const { return -1.0f; }
 };
 
 class OpenCvVideoCaptureBackend final : public CameraCaptureBackend {
@@ -328,10 +330,12 @@ private:
 #if defined(ARGUS_HAVE_LIBCAM2OPENCV)
 class Libcamera2OpenCvBackend final : public CameraCaptureBackend {
 public:
-    explicit Libcamera2OpenCvBackend(int camera_index) {
+    explicit Libcamera2OpenCvBackend(int camera_index, float focus_position = -1.0f) {
         Libcam2OpenCVSettings settings;
         settings.cameraIndex = static_cast<unsigned int>(std::max(camera_index, 0));
         settings.framerate = kTargetFrameRate;
+        settings.lensPosition = focus_position;
+        current_focus_position_ = focus_position;
 
         camera_.registerCallback([this](const cv::Mat& frame,
                                         const libcamera::ControlList&) {
@@ -405,6 +409,17 @@ public:
         return "libcamera2opencv";
     }
 
+    bool setFocusPosition(float position) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        current_focus_position_ = position;
+        return true;  // Focus change will apply on next frame
+    }
+
+    float getFocusPosition() const override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return current_focus_position_;
+    }
+
 private:
     void safeStop() noexcept {
         if (open_) {
@@ -431,6 +446,7 @@ private:
     std::uint64_t delivered_sequence_{0};
     bool open_{false};
     std::string last_error_;
+    float current_focus_position_{-1.0f};
 };
 #endif
 
@@ -443,7 +459,7 @@ std::unique_ptr<CameraCaptureBackend> makeCameraBackend(CameraCapture::Options o
 #if defined(ARGUS_HAVE_LIBCAM2OPENCV)
             {
                 auto backend =
-                    std::make_unique<Libcamera2OpenCvBackend>(options.camera_index);
+                    std::make_unique<Libcamera2OpenCvBackend>(options.camera_index, options.focus_position);
                 if (backend->isOpen()) {
                     return backend;
                 }
@@ -464,7 +480,7 @@ std::unique_ptr<CameraCaptureBackend> makeCameraBackend(CameraCapture::Options o
 #if defined(ARGUS_HAVE_LIBCAM2OPENCV)
             {
                 auto backend =
-                    std::make_unique<Libcamera2OpenCvBackend>(options.camera_index);
+                    std::make_unique<Libcamera2OpenCvBackend>(options.camera_index, options.focus_position);
                 if (backend->isOpen()) {
                     return backend;
                 }
@@ -487,7 +503,7 @@ CameraCapture::CameraCapture(int camera_index)
     : CameraCapture(Options{camera_index, BackendPreference::Auto}) {}
 
 CameraCapture::CameraCapture(Options options)
-    : backend_preference_(options.backend_preference) {
+    : backend_preference_(options.backend_preference), current_focus_position_(options.focus_position) {
     backend_ = makeCameraBackend(options);
 }
 
@@ -516,4 +532,22 @@ std::string CameraCapture::backendImplementation() const {
 
 CameraCapture::BackendPreference CameraCapture::backendPreference() const noexcept {
     return backend_preference_;
+}
+
+bool CameraCapture::setFocusPosition(float position) {
+    // Clamp position to valid range
+    position = std::max(-1.0f, std::min(1.0f, position));
+    current_focus_position_ = position;
+    
+    if (!backend_) {
+        return false;
+    }
+    return backend_->setFocusPosition(position);
+}
+
+float CameraCapture::getFocusPosition() const {
+    if (!backend_) {
+        return current_focus_position_;
+    }
+    return backend_->getFocusPosition();
 }

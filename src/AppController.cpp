@@ -3091,6 +3091,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         << "[LIVE_TEST] Physical button = single-button control\n"
         << "[LIVE_TEST] Controls: space/button=control, 0/1/2/3=mode/routine, esc=quit\n"
         << "[LIVE_TEST] Manual mode keys: d/a=base left/right, w/s=forward/back, i/k=up/down, l/j=open/close\n"
+        << "[LIVE_TEST] Focus keys: +/-=manual focus (Pi Camera Module 3 only)\n"
         << "[LIVE_TEST] Starting in DISARMED setup mode\n"
         << "[LIVE_TEST] Guardian thresholds: freeze after "
         << kLiveFreezeBadFrameThreshold
@@ -4149,6 +4150,27 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
             if (!requestContinue()) {
                 break;
             }
+        }
+
+        // Handle focus control with + and - keys
+        if (normalized_key == '+' || normalized_key == '=') {
+            float current_focus = camera_capture.getFocusPosition();
+            if (current_focus < 0.0f) {
+                current_focus = 0.0f;  // Start from closest if in autofocus mode
+            }
+            float new_focus = std::min(1.0f, current_focus + 0.1f);
+            camera_capture.setFocusPosition(new_focus);
+            std::cout << "[LIVE_TEST] Focus position increased to " << std::fixed 
+                      << std::setprecision(2) << new_focus << " (0.0=close, 1.0=far)" << std::endl;
+        } else if (normalized_key == '-' || normalized_key == '_') {
+            float current_focus = camera_capture.getFocusPosition();
+            if (current_focus < 0.0f) {
+                current_focus = 1.0f;  // Start from farthest if in autofocus mode
+            }
+            float new_focus = std::max(0.0f, current_focus - 0.1f);
+            camera_capture.setFocusPosition(new_focus);
+            std::cout << "[LIVE_TEST] Focus position decreased to " << std::fixed 
+                      << std::setprecision(2) << new_focus << " (0.0=close, 1.0=far)" << std::endl;
         }
 
         std::size_t requested_routine_index = 0;
