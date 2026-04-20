@@ -9,7 +9,14 @@ option(ARGUS_ENABLE_LIBCAMERA2OPENCV
        "Enable bundled libcamera2opencv camera backend when dependencies are available"
        ON)
 
-find_package(OpenCV REQUIRED)
+find_package(OpenCV QUIET)
+if(NOT OpenCV_FOUND)
+    message(FATAL_ERROR
+        "OpenCV not found.\n"
+        "Install prerequisites on Debian/Raspberry Pi OS:\n"
+        "  sudo apt update\n"
+        "  sudo apt install -y build-essential cmake pkg-config libopencv-dev libopencv-contrib-dev\n")
+endif()
 find_package(Threads REQUIRED)
 
 # Main ARGUS executable

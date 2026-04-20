@@ -127,10 +127,15 @@ struct VisionConfig {
 
     // Depth layer colour detection
     //
-    // The forbidden layer is a specific playdough colour (blue) placed
+    // The forbidden layer is a specific playdough colour (pink/magenta) placed
     // beneath the permitted cutting layers. When this colour becomes visible
     // inside the ROI the tool has exceeded its permitted depth and the robot
     // must freeze and retract immediately.
+    //
+    // Changed from green to pink (RGB ~200-230 / 20-30 / 130-140) because
+    // green detection was unreliable near windows—varying daylight made green
+    // appear as black, blue, or white. Pink is more distinctive and stable
+    // under mixed fluorescent + daylight conditions.
     //
     // HSV is used in preference to BGR because it separates colour (hue)
     // from brightness (value), making detection robust under variable
@@ -142,26 +147,24 @@ struct VisionConfig {
     //   S (saturation): 0 – 255
     //   V (value):      0 – 255
     //
-    // Blue does not wrap around the HSV wheel, so only range 1 is needed.
-    // Range 2 is disabled by setting depthHueLower2 > depthHueUpper2,
+    // Pink does not wrap around the HSV wheel, so only range 1 is needed.
+    // Range 2 remains disabled by setting depthHueLower2 > depthHueUpper2,
     // which causes cv::inRange to produce an empty mask2 so the
     // bitwise_or in Stage 8 reduces to mask1 alone.
 
-    int depthHueLower1 = 100;   ///< Lower hue bound for blue.
-    int depthHueUpper1 = 130;   ///< Upper hue bound for blue.
+    int depthHueLower1 = 155;   ///< Lower hue bound for pink/magenta.
+    int depthHueUpper1 = 165;   ///< Upper hue bound for pink/magenta.
 
     int depthHueLower2 = 255;   ///< Disabled - lower > upper produces empty mask2.
     int depthHueUpper2 = 0;     ///< Disabled - see depthHueLower2 above.
 
-    int depthSatMin = 100;      ///< Minimum saturation threshold.
-                                ///< Filters washed-out or near-grey pixels
-                                ///< that share the target hue by coincidence.
+    int depthSatMin = 220;      ///< Minimum saturation threshold.
+                                ///< Pink is highly saturated; filters weak/washed-out pixels.
 
     int depthSatMax = 255;      ///< Maximum saturation threshold.
 
-    int depthValMin = 50;       ///< Minimum value (brightness) threshold.
-                                ///< Filters very dark pixels that appear
-                                ///< to match the hue under shadow conditions.
+    int depthValMin = 200;      ///< Minimum value (brightness) threshold.
+                                ///< Pink is bright; filters very dark pixels.
 
     int depthValMax = 255;      ///< Maximum value threshold.
 

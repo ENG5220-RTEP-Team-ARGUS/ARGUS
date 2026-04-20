@@ -99,6 +99,16 @@ public:
         const cv::Mat& frame,
         std::chrono::steady_clock::time_point captureTimestamp);
 
+    /**
+     * @brief Updates the safety configuration at runtime.
+     *
+     * Allows dynamic adjustment of thresholds (e.g., via UI sliders) without
+     * reconstructing the VisionProcessor. Useful for calibration and testing
+     * under varying lighting conditions.
+     *
+     * @param newConfig The updated configuration to apply.
+     */
+    void updateConfig(const VisionConfig& newConfig);
 
 private:
 

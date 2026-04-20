@@ -1,127 +1,164 @@
-#ifndef GUARDIAN_STATE_MACHINE_HPP  // To prevent multiple inclusion of this header file
-#define GUARDIAN_STATE_MACHINE_HPP  // To define the guard macro (included only once)
+/**
+ * @file GuardianStateMachine.hpp
+ * @brief Finite-state safety supervisor used by ARGUS.
+ *
+ * The Guardian is a compact three-state FSM with hysteresis:
+ * - unsafe evidence must persist for N bad frames before freeze
+ * - safe evidence must persist for M good frames before clear
+ *
+ * This design avoids oscillation on noisy vision input while keeping
+ * behavior deterministic and easy to audit in logs.
+ */
 
-#include <string>
+#ifndef GUARDIAN_STATE_MACHINE_HPP
+#define GUARDIAN_STATE_MACHINE_HPP
+
 #include <functional>
+#include <string>
 
-
-// Enum Definitions
+/**
+ * @brief Internal FSM states.
+ */
 enum class GuardianState {
-    SAFE_MONITORING,   // Normal monitoring state (system running normally)
-    FROZEN_UNSAFE,     // Unsafe detected -> motion is frozen
-    RESET_PENDING      // Operator acknowledged -> waiting for stable recovery
+    SAFE_MONITORING,  ///< Normal operation; monitoring incoming frame status.
+    FROZEN_UNSAFE,    ///< Unsafe condition latched; motion remains blocked.
+    RESET_PENDING     ///< Operator acknowledged; waiting for stable good frames.
 };
 
+/**
+ * @brief Per-frame safety classification delivered by vision.
+ */
 enum class FrameStatus {
-    FRAME_GOOD,        // Frame is in safe condition
-    FRAME_BAD          // Frame indicates unsafe condition
+    FRAME_GOOD,  ///< Frame classified as safe.
+    FRAME_BAD    ///< Frame classified as unsafe.
 };
 
+/**
+ * @brief Events consumed by the FSM transition logic.
+ */
 enum class GuardianEvent {
-    FRAME_GOOD,        // Event triggered when a safe frame is received
-    FRAME_BAD,         // Event triggered when an unsafe frame is received
-    OPERATOR_ACK       // Event triggered when operator acknowledges/reset
+    FRAME_GOOD,   ///< Safe-frame event.
+    FRAME_BAD,    ///< Unsafe-frame event.
+    OPERATOR_ACK  ///< Operator/manual acknowledge event.
 };
 
+/**
+ * @brief Side effects emitted by transitions.
+ */
 enum class GuardianAction {
-    NONE,              // No action required
-    FREEZE_NOW,        // Immediately freeze/block motion
-    CLEAR_FREEZE       // Clear freeze and resume motion
+    NONE,         ///< No hardware action required.
+    FREEZE_NOW,   ///< Immediate freeze/block action.
+    CLEAR_FREEZE  ///< Clear freeze and allow motion.
 };
 
-
-// Class Declaration
+/**
+ * @brief Event-driven safety state machine with callback hooks.
+ *
+ * Integration model:
+ * - `processFrame(...)` is called for each vision decision.
+ * - `operatorAcknowledge()` is called when operator input is received.
+ * - callbacks notify external systems (interlock/motion controller) on
+ *   freeze/clear transitions.
+ */
 class GuardianStateMachine {
-private:
-
-    // Current state of the state machine
-    GuardianState currentState;
-
-    // Counts consecutive bad frames (used in SAFE_MONITORING)
-    int badCount;
-
-    // Counts consecutive good frames (used in RESET_PENDING)
-    int goodCount;
-
-    // Threshold: number of bad frames required to freeze
-    int freezeCount;
-
-    // Threshold: number of good frames required to clear freeze
-    int recoverCount;
-
-    // Indicates whether motion is currently blocked
-    bool motionBlocked;
-    
-    // Callback function executed when freeze occurs
-    std::function<void()> onFreezeCallback;
-
-    // Callback function executed when freeze is cleared
-    std::function<void()> onClearFreezeCallback;
-
-    // Callback function executed when state changes
-    std::function<void(GuardianState, GuardianState)> onStateChangeCallback;
-
-    // Executes an action (FREEZE_NOW or CLEAR_FREEZE)
-    void executeAction(GuardianAction action);
-
-    // Handles transition from one state to another
-    void transitionTo(GuardianState newState, GuardianAction action);
-
-    // Logs state transition
-    void logTransition(GuardianState from, GuardianState to);
-
-    // Logs actions
-    void logAction(const std::string& action);
-
 public:
+    /**
+     * @brief Construct the FSM with frame-count hysteresis thresholds.
+     * @param fc Consecutive bad frames required to freeze.
+     * @param rc Consecutive good frames required to clear after ack.
+     */
+    GuardianStateMachine(int fc = 30, int rc = 3);
 
-    // Constructor with configurable thresholds:
-    // fc = number of bad frames to trigger freeze
-    // rc = number of good frames to clear freeze
-    GuardianStateMachine(int fc = 30, int rc = 3);    // Note: To be adjusted accordingly in future revisions
-    
-    // Main function that processes incoming events
+    /**
+     * @brief Process an explicit FSM event.
+     */
     void processEvent(GuardianEvent event);
 
-    // Convenience function to convert FrameStatus into GuardianEvent
+    /**
+     * @brief Convenience wrapper that maps frame status to an FSM event.
+     */
     void processFrame(FrameStatus status);
 
-    // Function to handle operator acknowledgment input
+    /**
+     * @brief Inject an operator acknowledge event.
+     */
     void operatorAcknowledge();
-    
-    // Set callback for freeze action
+
+    /**
+     * @brief Register callback fired when freeze is commanded.
+     */
     void setOnFreezeCallback(std::function<void()> callback);
 
-    // Set callback for clear-freeze action
+    /**
+     * @brief Register callback fired when freeze is cleared.
+     */
     void setOnClearFreezeCallback(std::function<void()> callback);
 
-    // Set callback for state transitions
+    /**
+     * @brief Register callback fired on state transitions.
+     */
     void setOnStateChangeCallback(
         std::function<void(GuardianState, GuardianState)> callback);
-    
-    // Returns the current state
+
+    /**
+     * @brief Get current FSM state.
+     */
     GuardianState getState() const;
 
-    // Returns true if motion is currently blocked
+    /**
+     * @brief True when guardian currently blocks motion.
+     */
     bool isMotionBlocked() const;
 
-    // Returns true if motion is currently allowed
+    /**
+     * @brief True when motion is currently allowed.
+     */
     bool isMotionAllowed() const;
 
-    // Returns number of consecutive bad frames
+    /**
+     * @brief Get current consecutive bad-frame count.
+     */
     int getBadCount() const;
 
-    // Returns number of consecutive good frames
+    /**
+     * @brief Get current consecutive good-frame count.
+     */
     int getGoodCount() const;
-    
-    // Converts state enum into readable string
+
+    /**
+     * @brief Convert a state enum to a readable string.
+     */
     std::string stateToString(GuardianState state) const;
 
-    // Returns string version of current state
+    /**
+     * @brief Return readable string for current state.
+     */
     std::string getCurrentStateString() const;
 
-    // Prints full status of the guardian
+    /**
+     * @brief Print a status snapshot for debugging.
+     */
     void printStatus() const;
+
+private:
+    // State and counters
+    GuardianState currentState;
+    int badCount;
+    int goodCount;
+    int freezeCount;
+    int recoverCount;
+    bool motionBlocked;
+
+    // Integration callbacks
+    std::function<void()> onFreezeCallback;
+    std::function<void()> onClearFreezeCallback;
+    std::function<void(GuardianState, GuardianState)> onStateChangeCallback;
+
+    // Internal helpers
+    void executeAction(GuardianAction action);
+    void transitionTo(GuardianState newState, GuardianAction action);
+    void logTransition(GuardianState from, GuardianState to);
+    void logAction(const std::string& action);
 };
 
-#endif // GUARDIAN_STATE_MACHINE_HPP
+#endif  // GUARDIAN_STATE_MACHINE_HPP

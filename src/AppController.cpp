@@ -32,7 +32,9 @@
 
 namespace {
 
-constexpr const char* kLiveWindowName = "ARGUS Live Test";
+constexpr const char* kLiveCameraWindowName = "ARGUS live camera";
+constexpr const char* kLiveStatusWindowName = "ARGUS live status";
+constexpr const char* kLiveMetricsWindowName = "ARGUS live metrics";
 constexpr const char* kDefaultI2cDevicePath = "/dev/i2c-1";
 constexpr std::uint8_t kDefaultPca9685Address = 0x40;
 constexpr float kDefaultPwmFrequencyHz = 50.0f;
@@ -45,7 +47,9 @@ constexpr MotionChannelMap kMotionChannelMap{
     kLowerServoChannel,
     kUpperServoChannel,
     kGripServoChannel};
-constexpr int kLiveFreezeBadFrameThreshold = 30;
+// 15 bad frames keeps freeze pipeline latency around ~450-900 ms
+// across typical 20-30 FPS capture rates.
+constexpr int kLiveFreezeBadFrameThreshold = 15;
 constexpr int kLiveRecoverGoodFrameThreshold = 3;
 constexpr std::chrono::milliseconds kSmokeStepDwell{3000};
 constexpr int kSmokeBaseMinOffset = -90;
@@ -76,6 +80,7 @@ constexpr int kDemoGripStep = 45;
 constexpr std::chrono::milliseconds kCaptureRetryBackoff{50};
 constexpr std::chrono::milliseconds kDemoSlewStepInterval{100};
 constexpr int kDemoSlewStepDegrees = 1;
+constexpr int kLiveManualNudgeDegrees = 5;
 constexpr std::chrono::milliseconds kSurgeryRetractDwell{350};
 constexpr int kSurgeryForwardOffset = 22;
 constexpr int kSurgeryBackwardOffset = -22;
@@ -185,6 +190,88 @@ std::string formatFocusScore(double focus_score) {
     std::ostringstream oss;
     oss << std::fixed << std::setprecision(1) << focus_score;
     return oss.str();
+}
+
+int normaliseHue(int hue) {
+    int value = hue % 180;
+    if (value < 0) {
+        value += 180;
+    }
+    return value;
+}
+
+int hueBandMidpoint(int lower, int upper) {
+    const int l = normaliseHue(lower);
+    const int u = normaliseHue(upper);
+    if (l <= u) {
+        return (l + u) / 2;
+    }
+
+    const int wrapped_span = (u + 180) - l;
+    return normaliseHue(l + (wrapped_span / 2));
+}
+
+std::string describeHueBand(int lower, int upper) {
+    const int l = normaliseHue(lower);
+    const int u = normaliseHue(upper);
+    if (l <= u) {
+        return std::to_string(l) + "-" + std::to_string(u);
+    }
+    return std::to_string(l) + "-179 + 0-" + std::to_string(u);
+}
+
+std::string hueFamilyName(int hue_midpoint) {
+    const int h = normaliseHue(hue_midpoint);
+    if (h <= 8 || h >= 170) {
+        return "Red";
+    }
+    if (h <= 20) {
+        return "Orange";
+    }
+    if (h <= 34) {
+        return "Yellow";
+    }
+    if (h <= 85) {
+        return "Green";
+    }
+    if (h <= 100) {
+        return "Cyan";
+    }
+    if (h <= 130) {
+        return "Blue";
+    }
+    if (h <= 145) {
+        return "Purple";
+    }
+    return "Pink/Magenta";
+}
+
+std::string describeForbiddenColour(const VisionConfig& config) {
+    const int hue_mid = hueBandMidpoint(config.depthHueLower1, config.depthHueUpper1);
+    return hueFamilyName(hue_mid);
+}
+
+std::string describeForbiddenColourThresholds(const VisionConfig& config) {
+    return "H " + describeHueBand(config.depthHueLower1, config.depthHueUpper1) +
+           " | S " + std::to_string(config.depthSatMin) + "-" +
+           std::to_string(config.depthSatMax) + " | V " +
+           std::to_string(config.depthValMin) + "-" +
+           std::to_string(config.depthValMax) + " | px >= " +
+           std::to_string(config.depthPixelThreshold);
+}
+
+cv::Scalar forbiddenColourSwatchBgr(const VisionConfig& config) {
+    const int hue = hueBandMidpoint(config.depthHueLower1, config.depthHueUpper1);
+    const int sat =
+        std::clamp((config.depthSatMin + config.depthSatMax) / 2, 0, 255);
+    const int val =
+        std::clamp((config.depthValMin + config.depthValMax) / 2, 0, 255);
+
+    cv::Mat hsv(1, 1, CV_8UC3, cv::Scalar(hue, sat, val));
+    cv::Mat bgr;
+    cv::cvtColor(hsv, bgr, cv::COLOR_HSV2BGR);
+    const cv::Vec3b pixel = bgr.at<cv::Vec3b>(0, 0);
+    return cv::Scalar(pixel[0], pixel[1], pixel[2]);
 }
 
 struct RuntimeLatencyMetrics {
@@ -463,7 +550,16 @@ struct SupervisoryUiModel {
     std::string freeze_reason;
     std::string footer_info;
     RuntimeLatencyMetrics latency;
+    std::vector<double> vision_latency_history_us;
+    std::vector<double> unsafe_detect_history_ms;
+    std::vector<double> freeze_pipeline_history_ms;
+    std::vector<double> freeze_cmd_history_ms;
+    std::vector<double> total_stop_history_ms;
+    std::vector<double> ack_resume_history_ms;
     std::vector<SupervisoryUiRow> status_rows;
+    std::string forbidden_colour_label;
+    std::string forbidden_colour_thresholds;
+    cv::Scalar forbidden_colour_swatch = cv::Scalar(150, 150, 150);
     bool show_focus = false;
     std::string focus_label;
     cv::Scalar focus_color;
@@ -480,11 +576,84 @@ struct SupervisoryUiModel {
     bool emphasise_danger = false;
 };
 
+const char* safetyStateToUiString(SafetyState state) {
+    switch (state) {
+        case SafetyState::SAFE:
+            return "Safe";
+        case SafetyState::TOOL_NOT_DETECTED:
+            return "Tool not detected";
+        case SafetyState::OUTSIDE_ALLOWED_ZONE:
+            return "Outside allowed zone";
+        case SafetyState::EXCESSIVE_SPEED:
+            return "Excessive speed";
+        case SafetyState::INVALID_ORIENTATION:
+            return "Invalid orientation";
+        case SafetyState::DEPTH_EXCEEDED:
+            return "Depth exceeded";
+        default:
+            return "Unknown";
+    }
+}
+
+const char* guardianStateToUiString(GuardianState state) {
+    switch (state) {
+        case GuardianState::SAFE_MONITORING:
+            return "Safe (monitoring)";
+        case GuardianState::FROZEN_UNSAFE:
+            return "Frozen (unsafe)";
+        case GuardianState::RESET_PENDING:
+            return "Reset (pending)";
+        default:
+            return "Unknown";
+    }
+}
+
+const char* interlockStateToUiString(InterlockState state) {
+    switch (state) {
+        case InterlockState::SAFE:
+            return "Safe";
+        case InterlockState::FROZEN:
+            return "Frozen";
+        case InterlockState::FAULT:
+            return "Fault";
+        default:
+            return "Unknown";
+    }
+}
+
+const char* freezeReasonToUiString(FreezeReason reason) {
+    switch (reason) {
+        case FreezeReason::NONE:
+            return "None";
+        case FreezeReason::MARKER_LOST:
+            return "Tool not detected";
+        case FreezeReason::MARKER_OUT_OF_ROI:
+            return "Out of allowed zone";
+        case FreezeReason::VISION_TIMEOUT:
+            return "Vision timeout";
+        case FreezeReason::POSITION_ERROR:
+            return "Position error";
+        case FreezeReason::DEPTH_EXCEEDED:
+            return "Depth exceeded";
+        case FreezeReason::WATCHDOG_TIMEOUT:
+            return "Watchdog timeout";
+        case FreezeReason::UNKNOWN_FAULT:
+        default:
+            return "Unknown fault";
+    }
+}
+
+bool isFreezeReasonActiveForUi(const std::string& freeze_reason_text) {
+    return freeze_reason_text != "N/A" && freeze_reason_text != "None" &&
+           freeze_reason_text != "NONE";
+}
+
 cv::Scalar severityColor(const std::string& value) {
     if (value.find("FAULT") != std::string::npos ||
         value.find("FROZEN") != std::string::npos ||
         value.find("UNSAFE") != std::string::npos ||
         value.find("DETECTED") != std::string::npos ||
+        value.find("EXCEEDED") != std::string::npos ||
         value.find("OUTSIDE") != std::string::npos) {
         return cv::Scalar(60, 60, 200);
     }
@@ -509,6 +678,138 @@ void drawPanel(cv::Mat& frame,
                const cv::Scalar& border) {
     drawRectangle(frame, top_left, bottom_right, fill, -1);
     drawRectangle(frame, top_left, bottom_right, border, 1);
+}
+
+const cv::Mat& argusLogoImage() {
+    static cv::Mat logo;
+    static bool loaded = false;
+    if (!loaded) {
+        loaded = true;
+        const std::array<const char*, 4> candidate_paths = {{
+            "gui/ENG5220_team-ARGUS_logo-icon_no-bg.png",
+            "./gui/ENG5220_team-ARGUS_logo-icon_no-bg.png",
+            "../gui/ENG5220_team-ARGUS_logo-icon_no-bg.png",
+            "../../gui/ENG5220_team-ARGUS_logo-icon_no-bg.png",
+        }};
+
+        for (const char* path : candidate_paths) {
+            cv::Mat candidate = cv::imread(path, cv::IMREAD_UNCHANGED);
+            if (!candidate.empty()) {
+                logo = std::move(candidate);
+                break;
+            }
+        }
+    }
+    return logo;
+}
+
+bool drawArgusLogo(cv::Mat& frame, const cv::Rect& slot) {
+    const cv::Mat& logo = argusLogoImage();
+    if (logo.empty() || slot.width <= 2 || slot.height <= 2) {
+        return false;
+    }
+
+    const int available_w = slot.width - 2;
+    const int available_h = slot.height - 2;
+    const double scale = std::min(
+        static_cast<double>(available_w) / static_cast<double>(logo.cols),
+        static_cast<double>(available_h) / static_cast<double>(logo.rows));
+    if (scale <= 0.0) {
+        return false;
+    }
+
+    const int draw_w = std::max(1, static_cast<int>(logo.cols * scale));
+    const int draw_h = std::max(1, static_cast<int>(logo.rows * scale));
+    cv::Mat resized_logo;
+    cv::resize(logo, resized_logo, cv::Size(draw_w, draw_h), 0, 0, cv::INTER_AREA);
+
+    const int draw_x = slot.x + (slot.width - draw_w) / 2;
+    const int draw_y = slot.y + (slot.height - draw_h) / 2;
+    if (draw_x < 0 || draw_y < 0 || draw_x + draw_w > frame.cols ||
+        draw_y + draw_h > frame.rows) {
+        return false;
+    }
+
+    cv::Mat dst_roi = frame(cv::Rect(draw_x, draw_y, draw_w, draw_h));
+    if (resized_logo.channels() == 4) {
+        cv::Mat src_bgr;
+        cv::cvtColor(resized_logo, src_bgr, cv::COLOR_BGRA2BGR);
+
+        std::vector<cv::Mat> channels;
+        cv::split(resized_logo, channels);
+        cv::Mat alpha_f;
+        channels[3].convertTo(alpha_f, CV_32FC1, 1.0 / 255.0);
+
+        cv::Mat src_f;
+        cv::Mat dst_f;
+        src_bgr.convertTo(src_f, CV_32FC3, 1.0 / 255.0);
+        dst_roi.convertTo(dst_f, CV_32FC3, 1.0 / 255.0);
+
+        cv::Mat alpha3;
+        std::vector<cv::Mat> alpha_channels(3, alpha_f);
+        cv::merge(alpha_channels, alpha3);
+        cv::Mat blended =
+            src_f.mul(alpha3) + dst_f.mul(cv::Scalar::all(1.0) - alpha3);
+        blended.convertTo(dst_roi, CV_8UC3, 255.0);
+        return true;
+    }
+
+    if (resized_logo.channels() == 3) {
+        resized_logo.copyTo(dst_roi);
+        return true;
+    }
+
+    return false;
+}
+
+void drawSparkline(cv::Mat& frame,
+                   cv::Point top_left,
+                   cv::Point bottom_right,
+                   const std::vector<double>& samples,
+                   const cv::Scalar& line_color) {
+    const cv::Scalar panel_fill(235, 235, 235);
+    const cv::Scalar panel_border(220, 220, 220);
+    drawPanel(frame, top_left, bottom_right, panel_fill, panel_border);
+
+    const int inner_x1 = top_left.x + 2;
+    const int inner_y1 = top_left.y + 2;
+    const int inner_x2 = bottom_right.x - 2;
+    const int inner_y2 = bottom_right.y - 2;
+    if (inner_x2 <= inner_x1 || inner_y2 <= inner_y1 || samples.empty()) {
+        return;
+    }
+
+    double min_value = samples.front();
+    double max_value = samples.front();
+    for (double sample : samples) {
+        min_value = std::min(min_value, sample);
+        max_value = std::max(max_value, sample);
+    }
+    if (max_value - min_value < 1e-6) {
+        max_value = min_value + 1.0;
+    }
+
+    const int usable_width = std::max(1, inner_x2 - inner_x1);
+    const std::size_t count = samples.size();
+    for (std::size_t i = 1; i < count; ++i) {
+        const int x_prev = inner_x1 +
+                           static_cast<int>((usable_width * (i - 1)) /
+                                            std::max<std::size_t>(1, count - 1));
+        const int x_curr = inner_x1 +
+                           static_cast<int>((usable_width * i) /
+                                            std::max<std::size_t>(1, count - 1));
+        const double prev_norm = (samples[i - 1] - min_value) / (max_value - min_value);
+        const double curr_norm = (samples[i] - min_value) / (max_value - min_value);
+        const int y_prev = inner_y2 -
+                           static_cast<int>(prev_norm * (inner_y2 - inner_y1));
+        const int y_curr = inner_y2 -
+                           static_cast<int>(curr_norm * (inner_y2 - inner_y1));
+        drawLine(frame,
+                 cv::Point(x_prev, y_prev),
+                 cv::Point(x_curr, y_curr),
+                 line_color,
+                 1);
+    }
 }
 
 void drawSupervisoryGui(cv::Mat& frame, const SupervisoryUiModel& model) {
@@ -569,13 +870,15 @@ void drawSupervisoryGui(cv::Mat& frame, const SupervisoryUiModel& model) {
               cv::Point(40, 32),
               panel_fill,
               model.state_color);
-    cv::putText(frame,
-                "A",
-                cv::Point(22, 25),
-                cv::FONT_HERSHEY_SIMPLEX,
-                0.6,
-                primary_text,
-                2);
+    if (!drawArgusLogo(frame, cv::Rect(12, 6, 29, 27))) {
+        cv::putText(frame,
+                    "A",
+                    cv::Point(22, 25),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    primary_text,
+                    2);
+    }
 
     cv::putText(frame,
                 "ARGUS",
@@ -621,7 +924,7 @@ void drawSupervisoryGui(cv::Mat& frame, const SupervisoryUiModel& model) {
                 muted_text,
                 1);
     cv::putText(frame,
-                "Operator -> " + model.operator_prompt,
+                "Control: " + model.operator_prompt,
                 cv::Point(width - 240, header_height + 20),
                 cv::FONT_HERSHEY_SIMPLEX,
                 0.38,
@@ -645,7 +948,7 @@ void drawSupervisoryGui(cv::Mat& frame, const SupervisoryUiModel& model) {
 
     drawLeftCard(82, model.state_color, [&](int x, int y0) {
         cv::putText(frame,
-                    "SAFETY STATE",
+                    "Safety state",
                     cv::Point(x + 12, y0 + 16),
                     cv::FONT_HERSHEY_SIMPLEX,
                     0.35,
@@ -669,14 +972,14 @@ void drawSupervisoryGui(cv::Mat& frame, const SupervisoryUiModel& model) {
 
     drawLeftCard(62, model.motion_color, [&](int x, int y0) {
         cv::putText(frame,
-                    "MOTION GATE",
+                    "Motion",
                     cv::Point(x + 12, y0 + 16),
                     cv::FONT_HERSHEY_SIMPLEX,
                     0.35,
                     muted_text,
                     1);
         cv::putText(frame,
-                    std::string("MOTION ") + model.motion_label,
+                    model.motion_label,
                     cv::Point(x + 12, y0 + 44),
                     uiPlainFontFace(),
                     1.0,
@@ -686,7 +989,7 @@ void drawSupervisoryGui(cv::Mat& frame, const SupervisoryUiModel& model) {
 
     drawLeftCard(62, panel_border, [&](int x, int y0) {
         cv::putText(frame,
-                    "NEXT ACTION",
+                    "Next step",
                     cv::Point(x + 12, y0 + 16),
                     cv::FONT_HERSHEY_SIMPLEX,
                     0.35,
@@ -701,10 +1004,10 @@ void drawSupervisoryGui(cv::Mat& frame, const SupervisoryUiModel& model) {
                     1);
     });
 
-    if (model.freeze_reason != "NONE" && model.freeze_reason != "N/A") {
+    if (isFreezeReasonActiveForUi(model.freeze_reason)) {
         drawLeftCard(62, cv::Scalar(60, 60, 200), [&](int x, int y0) {
             cv::putText(frame,
-                        "FREEZE REASON",
+                        "Why stopped",
                         cv::Point(x + 12, y0 + 16),
                         cv::FONT_HERSHEY_SIMPLEX,
                         0.35,
@@ -768,7 +1071,7 @@ void drawSupervisoryGui(cv::Mat& frame, const SupervisoryUiModel& model) {
         ry += 16;
     };
 
-    drawRightSectionTitle("SUBSYSTEMS");
+    drawRightSectionTitle("Subsystems");
 
     for (const auto& row : model.status_rows) {
         cv::putText(frame,
@@ -822,7 +1125,7 @@ void drawSupervisoryGui(cv::Mat& frame, const SupervisoryUiModel& model) {
     ry += 6;
     drawRightSectionTitle("LATENCY");
     cv::putText(frame,
-                "vision_us " + std::to_string(model.latency.vision_us),
+                "Time to process frame: " + std::to_string(model.latency.vision_us) + " us",
                 cv::Point(rx, ry),
                 uiPlainFontFace(),
                 1.0,
@@ -830,7 +1133,7 @@ void drawSupervisoryGui(cv::Mat& frame, const SupervisoryUiModel& model) {
                 1);
     ry += 16;
     cv::putText(frame,
-                "unsafe_ms " +
+                "Time to detect unsafe: " +
                     formatLatencyMilliseconds(model.latency.unsafe_detect_ms),
                 cv::Point(rx, ry),
                 uiPlainFontFace(),
@@ -839,7 +1142,7 @@ void drawSupervisoryGui(cv::Mat& frame, const SupervisoryUiModel& model) {
                 1);
     ry += 16;
     cv::putText(frame,
-                "stop_ms " +
+                "Time to stop motion: " +
                     formatLatencyMilliseconds(model.latency.total_stop_ms),
                 cv::Point(rx, ry),
                 uiPlainFontFace(),
@@ -918,6 +1221,624 @@ void drawSupervisoryGui(cv::Mat& frame, const SupervisoryUiModel& model) {
                   border_thickness);
 }
 
+void drawCameraOverlay(cv::Mat& frame, const SupervisoryUiModel& model) {
+    if (frame.empty()) {
+        return;
+    }
+
+    const int width = frameWidth(frame);
+    const int height = frameHeight(frame);
+    const cv::Scalar muted_text(120, 120, 120);
+    const cv::Scalar white(255, 255, 255);
+
+    cv::putText(frame,
+                model.camera_hud_text,
+                cv::Point(14, 24),
+                uiPlainFontFace(),
+                0.95,
+                model.camera_hud_color,
+                1);
+    if (model.show_focus) {
+        const std::string focus_text = "FOCUS " + model.focus_label;
+        const int focus_x = std::max(12, width - 290);
+        cv::putText(frame,
+                    focus_text,
+                    cv::Point(focus_x, 24),
+                    uiPlainFontFace(),
+                    0.9,
+                    model.focus_color,
+                    1);
+    }
+
+    cv::putText(frame,
+                model.camera_bottom_left,
+                cv::Point(12, height - 12),
+                uiPlainFontFace(),
+                0.8,
+                muted_text,
+                1);
+    cv::putText(frame,
+                model.camera_bottom_right,
+                cv::Point(std::max(12, width - 90), height - 12),
+                uiPlainFontFace(),
+                0.8,
+                muted_text,
+                1);
+
+    if (model.show_frozen_overlay) {
+        drawRectangle(frame,
+                      cv::Point(6, 6),
+                      cv::Point(width - 7, height - 7),
+                      cv::Scalar(60, 60, 200),
+                      3);
+        const int title_y = std::max(80, height / 3);
+        cv::putText(frame,
+                    model.frozen_overlay_title,
+                    cv::Point(24, title_y),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    1.1,
+                    cv::Scalar(60, 60, 200),
+                    3);
+        cv::putText(frame,
+                    model.frozen_overlay_subtitle,
+                    cv::Point(24, title_y + 34),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.55,
+                    cv::Scalar(60, 60, 200),
+                    1);
+    } else if (model.show_waiting_overlay) {
+        const int box_w = std::max(320, width - 120);
+        const int x1 = std::max(20, (width - box_w) / 2);
+        const int y1 = std::max(40, height - 74);
+        drawPanel(frame,
+                  cv::Point(x1, y1),
+                  cv::Point(x1 + box_w, y1 + 34),
+                  white,
+                  cv::Scalar(50, 180, 230));
+        cv::putText(frame,
+                    model.waiting_overlay_text,
+                    cv::Point(x1 + 10, y1 + 22),
+                    uiPlainFontFace(),
+                    0.85,
+                    cv::Scalar(50, 180, 230),
+                    1);
+    }
+
+    const cv::Scalar border_color =
+        model.emphasise_danger ? cv::Scalar(60, 60, 200) : model.state_color;
+    const int border_thickness = model.emphasise_danger ? 4 : 2;
+    drawRectangle(frame,
+                  cv::Point(2, 2),
+                  cv::Point(width - 3, height - 3),
+                  border_color,
+                  border_thickness);
+}
+
+void drawStatusDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
+    if (frame.empty()) {
+        return;
+    }
+
+    const int width = frameWidth(frame);
+    const int height = frameHeight(frame);
+    const int header_height = 52;
+    const int state_bar_height = 32;
+    const int body_top = header_height + state_bar_height + 8;
+    const cv::Scalar panel_fill(245, 245, 245);
+    const cv::Scalar panel_border(220, 220, 220);
+    const cv::Scalar primary_text(25, 25, 25);
+    const cv::Scalar muted_text(120, 120, 120);
+    const cv::Scalar white(255, 255, 255);
+
+    frame.setTo(panel_fill);
+    drawPanel(frame,
+              cv::Point(0, 0),
+              cv::Point(width - 1, header_height),
+              panel_fill,
+              panel_border);
+    drawPanel(frame,
+              cv::Point(0, header_height),
+              cv::Point(width - 1, header_height + state_bar_height),
+              panel_fill,
+              panel_border);
+
+    drawPanel(frame,
+              cv::Point(10, 8),
+              cv::Point(38, 34),
+              panel_fill,
+              model.state_color);
+    if (!drawArgusLogo(frame, cv::Rect(10, 8, 29, 27))) {
+        cv::putText(frame,
+                    "A",
+                    cv::Point(20, 27),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    primary_text,
+                    2);
+    }
+
+    cv::putText(frame,
+                "ARGUS",
+                cv::Point(50, 23),
+                cv::FONT_HERSHEY_SIMPLEX,
+                0.55,
+                primary_text,
+                2);
+    cv::putText(frame,
+                "Safety supervisor",
+                cv::Point(50, 38),
+                cv::FONT_HERSHEY_SIMPLEX,
+                0.35,
+                muted_text,
+                1);
+    cv::putText(frame,
+                model.mode_title,
+                cv::Point(width - 124, 31),
+                uiPlainFontFace(),
+                0.9,
+                primary_text,
+                1);
+
+    cv::putText(frame,
+                model.state_label,
+                cv::Point(12, header_height + 22),
+                uiPlainFontFace(),
+                1.0,
+                model.state_color,
+                1);
+    cv::putText(frame,
+                model.state_description,
+                cv::Point(92, header_height + 22),
+                cv::FONT_HERSHEY_SIMPLEX,
+                0.36,
+                muted_text,
+                1);
+    cv::putText(frame,
+                "Control: " + model.operator_prompt,
+                cv::Point(12, header_height + 34),
+                cv::FONT_HERSHEY_SIMPLEX,
+                0.32,
+                model.state_color,
+                1);
+
+    const int card_margin = 12;
+    const int card_width = width - (2 * card_margin);
+    int card_y = body_top;
+    auto drawCard = [&](int height_px,
+                        const cv::Scalar& border_color,
+                        const auto& painter) {
+        drawPanel(frame,
+                  cv::Point(card_margin, card_y),
+                  cv::Point(card_margin + card_width, card_y + height_px),
+                  white,
+                  border_color);
+        painter(card_margin, card_y);
+        card_y += height_px + 8;
+    };
+
+    drawCard(76, model.state_color, [&](int x, int y0) {
+        cv::putText(frame,
+                    "Safety state",
+                    cv::Point(x + 10, y0 + 15),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.34,
+                    muted_text,
+                    1);
+        cv::putText(frame,
+                    model.state_label,
+                    cv::Point(x + 10, y0 + 44),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.8,
+                    model.state_color,
+                    2);
+        cv::putText(frame,
+                    model.state_description,
+                    cv::Point(x + 10, y0 + 62),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.34,
+                    primary_text,
+                    1);
+    });
+
+    drawCard(56, model.motion_color, [&](int x, int y0) {
+        cv::putText(frame,
+                    "Motion",
+                    cv::Point(x + 10, y0 + 15),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.34,
+                    muted_text,
+                    1);
+        cv::putText(frame,
+                    model.motion_label,
+                    cv::Point(x + 10, y0 + 40),
+                    uiPlainFontFace(),
+                    1.0,
+                    model.motion_color,
+                    1);
+    });
+
+    drawCard(56, panel_border, [&](int x, int y0) {
+        cv::putText(frame,
+                    "Next step",
+                    cv::Point(x + 10, y0 + 15),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.34,
+                    muted_text,
+                    1);
+        cv::putText(frame,
+                    model.next_action,
+                    cv::Point(x + 10, y0 + 40),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.4,
+                    primary_text,
+                    1);
+    });
+
+    const bool freeze_reason_active = isFreezeReasonActiveForUi(model.freeze_reason);
+    drawCard(56,
+             freeze_reason_active ? cv::Scalar(60, 60, 200) : panel_border,
+             [&](int x, int y0) {
+                 cv::putText(frame,
+                             "Why stopped",
+                             cv::Point(x + 10, y0 + 15),
+                             cv::FONT_HERSHEY_SIMPLEX,
+                             0.34,
+                             freeze_reason_active ? cv::Scalar(60, 60, 200) : muted_text,
+                             1);
+                 cv::putText(frame,
+                             model.freeze_reason,
+                             cv::Point(x + 10, y0 + 40),
+                             uiPlainFontFace(),
+                             1.0,
+                             freeze_reason_active ? severityColor(model.freeze_reason)
+                                                  : muted_text,
+                             1);
+             });
+
+    drawCard(72, panel_border, [&](int x, int y0) {
+        cv::putText(frame,
+                    "Forbidden colour",
+                    cv::Point(x + 10, y0 + 15),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.34,
+                    muted_text,
+                    1);
+        drawPanel(frame,
+                  cv::Point(x + 10, y0 + 24),
+                  cv::Point(x + 44, y0 + 54),
+                  model.forbidden_colour_swatch,
+                  panel_border);
+        cv::putText(frame,
+                    model.forbidden_colour_label,
+                    cv::Point(x + 54, y0 + 39),
+                    uiPlainFontFace(),
+                    0.95,
+                    primary_text,
+                    1);
+        cv::putText(frame,
+                    model.forbidden_colour_thresholds,
+                    cv::Point(x + 10, y0 + 66),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.29,
+                    muted_text,
+                    1);
+    });
+
+    int rx = card_margin + 2;
+    int ry = card_y + 12;
+    auto drawSectionTitle = [&](const std::string& title) {
+        cv::putText(frame,
+                    title,
+                    cv::Point(rx, ry),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.34,
+                    muted_text,
+                    1);
+        ry += 8;
+        drawLine(frame,
+                 cv::Point(card_margin, ry),
+                 cv::Point(width - card_margin, ry),
+                 panel_border,
+                 1);
+        ry += 14;
+    };
+
+    drawSectionTitle("Subsystems");
+    for (const auto& row : model.status_rows) {
+        cv::putText(frame,
+                    row.label,
+                    cv::Point(rx, ry),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.4,
+                    muted_text,
+                    1);
+        ry += 14;
+        cv::putText(frame,
+                    row.value,
+                    cv::Point(rx, ry),
+                    uiPlainFontFace(),
+                    1.0,
+                    row.value_color,
+                    1);
+        ry += 14;
+    }
+
+    const cv::Scalar border_color =
+        model.emphasise_danger ? cv::Scalar(60, 60, 200) : model.state_color;
+    drawRectangle(frame,
+                  cv::Point(2, 2),
+                  cv::Point(width - 3, height - 3),
+                  border_color,
+                  model.emphasise_danger ? 4 : 2);
+}
+
+void drawMetricsDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
+    if (frame.empty()) {
+        return;
+    }
+
+    const int width = frameWidth(frame);
+    const int header_height = 52;
+    const int state_bar_height = 32;
+    const int body_top = header_height + state_bar_height + 8;
+    const cv::Scalar panel_fill(245, 245, 245);
+    const cv::Scalar panel_border(220, 220, 220);
+    const cv::Scalar primary_text(25, 25, 25);
+    const cv::Scalar muted_text(120, 120, 120);
+    const cv::Scalar moderate_color(50, 180, 230);
+    const cv::Scalar white(255, 255, 255);
+    const cv::Scalar good_color(60, 170, 80);
+    const cv::Scalar slow_color(60, 60, 200);
+
+    frame.setTo(panel_fill);
+    drawPanel(frame,
+              cv::Point(0, 0),
+              cv::Point(width - 1, header_height),
+              panel_fill,
+              panel_border);
+    drawPanel(frame,
+              cv::Point(0, header_height),
+              cv::Point(width - 1, header_height + state_bar_height),
+              panel_fill,
+              panel_border);
+
+    drawPanel(frame,
+              cv::Point(10, 8),
+              cv::Point(38, 34),
+              panel_fill,
+              model.state_color);
+    if (!drawArgusLogo(frame, cv::Rect(10, 8, 29, 27))) {
+        cv::putText(frame,
+                    "A",
+                    cv::Point(20, 27),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    primary_text,
+                    2);
+    }
+
+    cv::putText(frame,
+                "ARGUS",
+                cv::Point(50, 23),
+                cv::FONT_HERSHEY_SIMPLEX,
+                0.55,
+                primary_text,
+                2);
+    cv::putText(frame,
+                "Metrics",
+                cv::Point(50, 38),
+                cv::FONT_HERSHEY_SIMPLEX,
+                0.35,
+                muted_text,
+                1);
+    cv::putText(frame,
+                model.mode_title,
+                cv::Point(width - 124, 31),
+                uiPlainFontFace(),
+                0.9,
+                primary_text,
+                1);
+
+    cv::putText(frame,
+                "Focus and safety timing",
+                cv::Point(12, header_height + 22),
+                uiPlainFontFace(),
+                1.0,
+                model.state_color,
+                1);
+    cv::putText(frame,
+                "Live signal and event timing",
+                cv::Point(12, header_height + 34),
+                cv::FONT_HERSHEY_SIMPLEX,
+                0.32,
+                muted_text,
+                1);
+
+    const int card_margin = 12;
+    const int card_width = width - (2 * card_margin);
+    int y = body_top;
+
+    drawPanel(frame,
+              cv::Point(card_margin, y),
+              cv::Point(card_margin + card_width, y + 62),
+              white,
+              panel_border);
+    cv::putText(frame,
+                "Focus",
+                cv::Point(card_margin + 10, y + 15),
+                cv::FONT_HERSHEY_SIMPLEX,
+                0.34,
+                muted_text,
+                1);
+    drawPanel(frame,
+              cv::Point(card_margin + 10, y + 22),
+              cv::Point(width - 22, y + 38),
+              cv::Scalar(235, 235, 235),
+              panel_border);
+    const int bar_width = std::max(
+        0,
+        static_cast<int>((width - card_margin - 34) *
+                         std::clamp(model.focus_fraction, 0.0, 1.0)));
+    if (model.show_focus && bar_width > 0) {
+        drawRectangle(frame,
+                      cv::Point(card_margin + 11, y + 23),
+                      cv::Point(card_margin + 11 + bar_width, y + 37),
+                      model.focus_color,
+                      -1);
+    }
+    cv::putText(frame,
+                model.show_focus ? model.focus_label : "N/A",
+                cv::Point(card_margin + 10, y + 56),
+                uiPlainFontFace(),
+                0.95,
+                model.show_focus ? model.focus_color : muted_text,
+                1);
+    y += 74;
+
+    cv::putText(frame,
+                "Vision processing",
+                cv::Point(card_margin + 2, y + 8),
+                cv::FONT_HERSHEY_SIMPLEX,
+                0.34,
+                muted_text,
+                1);
+    y += 16;
+    drawLine(frame,
+             cv::Point(card_margin, y),
+             cv::Point(width - card_margin, y),
+             panel_border,
+             1);
+    y += 10;
+    drawPanel(frame,
+              cv::Point(card_margin, y),
+              cv::Point(card_margin + card_width, y + 54),
+              white,
+              panel_border);
+    cv::putText(frame,
+                "Time to process frame: " + std::to_string(model.latency.vision_us) + " us",
+                cv::Point(card_margin + 10, y + 16),
+                uiPlainFontFace(),
+                0.95,
+                primary_text,
+                1);
+    drawSparkline(frame,
+                  cv::Point(card_margin + 10, y + 22),
+                  cv::Point(width - 20, y + 46),
+                  model.vision_latency_history_us,
+                  primary_text);
+    y += 66;
+
+    cv::putText(frame,
+                "Safety timing",
+                cv::Point(card_margin + 2, y + 8),
+                cv::FONT_HERSHEY_SIMPLEX,
+                0.34,
+                muted_text,
+                1);
+    y += 16;
+    drawLine(frame,
+             cv::Point(card_margin, y),
+             cv::Point(width - card_margin, y),
+             panel_border,
+             1);
+    y += 14;
+
+    auto drawLatencyBar = [&](const std::string& label,
+                              const std::optional<long long>& value_ms,
+                              long long good_threshold_ms) {
+        const long long moderate_threshold_ms = good_threshold_ms * 2;
+        const int card_height = 66;
+        const int x1 = card_margin;
+        const int x2 = card_margin + card_width;
+
+        drawPanel(frame,
+                  cv::Point(x1, y),
+                  cv::Point(x2, y + card_height),
+                  white,
+                  panel_border);
+
+        const std::string label_with_target =
+            label + " (target: <= " + std::to_string(good_threshold_ms) + " ms)";
+        cv::putText(frame,
+                    label_with_target,
+                    cv::Point(x1 + 10, y + 15),
+                    cv::FONT_HERSHEY_SIMPLEX,
+                    0.32,
+                    muted_text,
+                    1);
+
+        const int bar_x1 = x1 + 10;
+        const int bar_x2 = x2 - 10;
+        const int bar_y1 = y + 22;
+        const int bar_y2 = y + 40;
+        drawPanel(frame,
+                  cv::Point(bar_x1, bar_y1),
+                  cv::Point(bar_x2, bar_y2),
+                  cv::Scalar(235, 235, 235),
+                  panel_border);
+
+        cv::Scalar status_color = muted_text;
+        std::string status_text = "No event";
+        std::string value_text = "N/A";
+        int fill_width = 0;
+
+        if (value_ms.has_value()) {
+            const long long value = *value_ms;
+            value_text = std::to_string(value) + " ms";
+
+            if (value <= good_threshold_ms) {
+                status_text = "Good";
+                status_color = good_color;
+            } else if (value <= moderate_threshold_ms) {
+                status_text = "Moderate";
+                status_color = moderate_color;
+            } else {
+                status_text = "Slow";
+                status_color = slow_color;
+            }
+
+            const double fraction =
+                std::clamp(static_cast<double>(value) /
+                               static_cast<double>(moderate_threshold_ms),
+                           0.0,
+                           1.0);
+            fill_width = std::max(
+                1,
+                static_cast<int>((bar_x2 - bar_x1 - 2) * fraction));
+        }
+
+        if (fill_width > 0) {
+            drawRectangle(frame,
+                          cv::Point(bar_x1 + 1, bar_y1 + 1),
+                          cv::Point(bar_x1 + 1 + fill_width, bar_y2 - 1),
+                          status_color,
+                          -1);
+        }
+
+        cv::putText(frame,
+                    value_text + "  " + status_text,
+                    cv::Point(x1 + 10, y + 57),
+                    uiPlainFontFace(),
+                    0.95,
+                    status_color,
+                    1);
+
+        y += card_height + 8;
+    };
+
+    drawLatencyBar("Time to detect unsafe", model.latency.unsafe_detect_ms, 30);
+    drawLatencyBar("Time to issue freeze", model.latency.freeze_pipeline_ms, 900);
+    drawLatencyBar("Time to stop motion", model.latency.total_stop_ms, 8000);
+
+    const cv::Scalar border_color =
+        model.emphasise_danger ? cv::Scalar(60, 60, 200) : model.state_color;
+    drawRectangle(frame,
+                  cv::Point(2, 2),
+                  cv::Point(width - 3, frameHeight(frame) - 3),
+                  border_color,
+                  model.emphasise_danger ? 4 : 2);
+}
+
 const char* safetyStateToString(SafetyState state) {
     switch (state) {
         case SafetyState::SAFE:
@@ -930,6 +1851,8 @@ const char* safetyStateToString(SafetyState state) {
             return "EXCESSIVE_SPEED";
         case SafetyState::INVALID_ORIENTATION:
             return "INVALID_ORIENTATION";
+        case SafetyState::DEPTH_EXCEEDED:
+            return "DEPTH_EXCEEDED";
         default:
             return "UNKNOWN";
     }
@@ -944,6 +1867,8 @@ FreezeReason mapSafetyToFreezeReason(SafetyState state) {
         case SafetyState::EXCESSIVE_SPEED:
         case SafetyState::INVALID_ORIENTATION:
             return FreezeReason::POSITION_ERROR;
+        case SafetyState::DEPTH_EXCEEDED:
+            return FreezeReason::DEPTH_EXCEEDED;
         case SafetyState::SAFE:
         default:
             return FreezeReason::UNKNOWN_FAULT;
@@ -962,6 +1887,8 @@ const char* freezeReasonToString(FreezeReason reason) {
             return "VISION_TIMEOUT";
         case FreezeReason::POSITION_ERROR:
             return "POSITION_ERROR";
+        case FreezeReason::DEPTH_EXCEEDED:
+            return "DEPTH_EXCEEDED";
         case FreezeReason::WATCHDOG_TIMEOUT:
             return "WATCHDOG_TIMEOUT";
         case FreezeReason::UNKNOWN_FAULT:
@@ -1063,7 +1990,8 @@ constexpr std::array<JointPulseCalibration, MotionController::kServoCount>
     }};
 
 constexpr SmokeJointOffsets kSmokeHomePose{0, 0, 0, 0};
-constexpr SmokeJointOffsets kSurgeryRetractPose{0, 35, -30, 0};
+constexpr SmokeJointOffsets kSurgeryRetractPose{
+    0, 35, -30, kSurgeryGripHoldOffset};
 
 struct DemoPoseStep {
     const char* name;
@@ -1075,72 +2003,81 @@ struct LiveRoutineDefinition {
     const char* name;
     const DemoPoseStep* steps;
     std::size_t step_count;
+    bool auto_progress;
 };
 
-constexpr DemoPoseStep kDemoHomeStep{"HOME", kSmokeHomePose};
-constexpr DemoPoseStep kSurgeryRetractStep{"RETRACT_SAFE", kSurgeryRetractPose};
+constexpr DemoPoseStep kDemoHomeStep{"Home", kSmokeHomePose};
+constexpr DemoPoseStep kSurgeryRetractStep{"Retract (safe)", kSurgeryRetractPose};
 
 constexpr std::array<DemoPoseStep, 11> kLiveSurgeryCutSequence = {{
-    {"GRIP +90 (TOOL)", {0, 0, 0, kSurgeryGripHoldOffset}},
-    {"CUT P1 FORWARD", {0, 0, kSurgeryForwardOffset, kSurgeryGripHoldOffset}},
-    {"CUT P1 DOWN", {0, kSurgeryPassOneDepthOffset, kSurgeryForwardOffset, kSurgeryGripHoldOffset}},
-    {"CUT P1 BACKWARD", {0, kSurgeryPassOneDepthOffset, kSurgeryBackwardOffset, kSurgeryGripHoldOffset}},
-    {"CUT P2 FORWARD", {0, 0, kSurgeryForwardOffset, kSurgeryGripHoldOffset}},
-    {"CUT P2 DOWN (DEEPER)", {0, kSurgeryPassTwoDepthOffset, kSurgeryForwardOffset, kSurgeryGripHoldOffset}},
-    {"CUT P2 BACKWARD", {0, kSurgeryPassTwoDepthOffset, kSurgeryBackwardOffset, kSurgeryGripHoldOffset}},
-    {"CUT P3 FORWARD", {0, 0, kSurgeryForwardOffset, kSurgeryGripHoldOffset}},
-    {"CUT P3 DOWN (FAILURE PASS)", {0, kSurgeryPassThreeDepthOffset, kSurgeryForwardOffset, kSurgeryGripHoldOffset}},
-    {"CUT P3 BACKWARD", {0, kSurgeryPassThreeDepthOffset, kSurgeryBackwardOffset, kSurgeryGripHoldOffset}},
-    {"HOME", {0, 0, 0, kSurgeryGripHoldOffset}},
+    {"Grip +90 (tool)", {0, 0, 0, kSurgeryGripHoldOffset}},
+    {"Cut P1 forward", {0, 0, kSurgeryForwardOffset, kSurgeryGripHoldOffset}},
+    {"Cut P1 down", {0, kSurgeryPassOneDepthOffset, kSurgeryForwardOffset, kSurgeryGripHoldOffset}},
+    {"Cut P1 backward", {0, kSurgeryPassOneDepthOffset, kSurgeryBackwardOffset, kSurgeryGripHoldOffset}},
+    {"Cut P2 forward", {0, 0, kSurgeryForwardOffset, kSurgeryGripHoldOffset}},
+    {"Cut P2 down (deeper)", {0, kSurgeryPassTwoDepthOffset, kSurgeryForwardOffset, kSurgeryGripHoldOffset}},
+    {"Cut P2 backward", {0, kSurgeryPassTwoDepthOffset, kSurgeryBackwardOffset, kSurgeryGripHoldOffset}},
+    {"Cut P3 forward", {0, 0, kSurgeryForwardOffset, kSurgeryGripHoldOffset}},
+    {"Cut P3 down (failure pass)", {0, kSurgeryPassThreeDepthOffset, kSurgeryForwardOffset, kSurgeryGripHoldOffset}},
+    {"Cut P3 backward", {0, kSurgeryPassThreeDepthOffset, kSurgeryBackwardOffset, kSurgeryGripHoldOffset}},
+    {"Home", {0, 0, 0, kSurgeryGripHoldOffset}},
 }};
 
 constexpr std::array<DemoPoseStep, 5> kLiveBaseScanSequence = {{
-    {"HOME", {0, 0, 0, 0}},
-    {"BASE +45", {kDemoBaseStep, 0, 0, 0}},
-    {"HOME", {0, 0, 0, 0}},
-    {"BASE -45", {-kDemoBaseStep, 0, 0, 0}},
-    {"HOME", {0, 0, 0, 0}},
+    {"Home", {0, 0, 0, 0}},
+    {"Base +45", {kDemoBaseStep, 0, 0, 0}},
+    {"Home", {0, 0, 0, 0}},
+    {"Base -45", {-kDemoBaseStep, 0, 0, 0}},
+    {"Home", {0, 0, 0, 0}},
 }};
 
 constexpr std::array<DemoPoseStep, 5> kLiveGripPulseSequence = {{
-    {"HOME", {0, 0, 0, 0}},
-    {"GRIP +45", {0, 0, 0, kDemoGripStep}},
-    {"HOME", {0, 0, 0, 0}},
-    {"GRIP -45", {0, 0, 0, -kDemoGripStep}},
-    {"HOME", {0, 0, 0, 0}},
+    {"Home", {0, 0, 0, 0}},
+    {"Grip +45", {0, 0, 0, kDemoGripStep}},
+    {"Home", {0, 0, 0, 0}},
+    {"Grip -45", {0, 0, 0, -kDemoGripStep}},
+    {"Home", {0, 0, 0, 0}},
 }};
 
 LiveRoutineDefinition getLiveRoutineDefinition(std::size_t index) {
     switch (index) {
         case 1:
-            return {2,
-                    "BASE_SCAN",
-                    kLiveBaseScanSequence.data(),
-                    kLiveBaseScanSequence.size()};
+            return {1,
+                    "Surgery cut",
+                    kLiveSurgeryCutSequence.data(),
+                    kLiveSurgeryCutSequence.size(),
+                    true};
         case 2:
+            return {2,
+                    "Base scan",
+                    kLiveBaseScanSequence.data(),
+                    kLiveBaseScanSequence.size(),
+                    true};
+        case 3:
             return {3,
-                    "GRIP_PULSE",
+                    "Grip pulse",
                     kLiveGripPulseSequence.data(),
-                    kLiveGripPulseSequence.size()};
+                    kLiveGripPulseSequence.size(),
+                    true};
         case 0:
         default:
-            return {1,
-                    "SURGERY_CUT",
-                    kLiveSurgeryCutSequence.data(),
-                    kLiveSurgeryCutSequence.size()};
+            return {0, "Manual", nullptr, 0, false};
     }
 }
 
 bool liveRoutineIndexFromKey(int key, std::size_t& index) {
     switch (key) {
-        case '1':
+        case '0':
             index = 0;
             return true;
-        case '2':
+        case '1':
             index = 1;
             return true;
-        case '3':
+        case '2':
             index = 2;
+            return true;
+        case '3':
+            index = 3;
             return true;
         default:
             return false;
@@ -2266,14 +3203,16 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         << "[LIVE_TEST] Auto operator ack: "
         << (options.auto_ack ? "ON" : "OFF") << "\n"
         << "[LIVE_TEST] Physical button = single-button control\n"
-        << "[LIVE_TEST] Controls: space/button=single-button control, a/r/d=aliases, 1/2/3=select routine, q=quit\n"
+        << "[LIVE_TEST] Controls: space/button=control, 0/1/2/3=mode/routine, esc=quit\n"
+        << "[LIVE_TEST] Manual mode keys: d/a=base left/right, w/s=forward/back, i/k=up/down, l/j=open/close\n"
+        << "[LIVE_TEST] Focus keys: +/-=adjust focus (Pi Camera Module 3 only, -=autofocus)\n"
         << "[LIVE_TEST] Starting in DISARMED setup mode\n"
         << "[LIVE_TEST] Guardian thresholds: freeze after "
         << kLiveFreezeBadFrameThreshold
         << " consecutive bad frames, recover after "
         << kLiveRecoverGoodFrameThreshold
         << " consecutive good frames.\n"
-        << "[LIVE_TEST] Routines: 1=SURGERY_CUT, 2=BASE_SCAN, 3=GRIP_PULSE\n"
+        << "[LIVE_TEST] Modes: 0=manual, 1=surgery cut, 2=base scan, 3=grip pulse\n"
         << "[LIVE_TEST] Focus debug enabled: FOCUS_SCORE (Laplacian variance), "
            "higher usually means sharper marker edges.\n";
 
@@ -2315,7 +3254,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
     bool waiting_for_ack_announced = false;
     bool home_pose_staged = false;
     std::string current_pose_name = "HOME";
-    std::size_t selected_routine_index = 0;
+    std::size_t selected_routine_index = 1;
     std::size_t next_routine_step_index = 0;
     SmokeJointOffsets current_pose_offsets = kSmokeHomePose;
     bool current_pose_offsets_known = false;
@@ -2325,10 +3264,30 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         std::chrono::steady_clock::now();
     bool freeze_command_pending = false;
     std::optional<std::chrono::steady_clock::time_point> freeze_command_due;
+    bool freeze_waiting_for_retract_logged = false;
     ControllerEventQueue control_events;
     CppTimerCallback live_step_timer;
     bool live_step_timer_started = false;
     RuntimeLatencyMetrics latency_metrics;
+    constexpr std::size_t kVisionHistoryLimit = 180;
+    constexpr std::size_t kEventHistoryLimit = 64;
+    std::deque<double> vision_us_history;
+    std::deque<double> unsafe_detect_history_ms;
+    std::deque<double> freeze_pipeline_history_ms;
+    std::deque<double> freeze_cmd_history_ms;
+    std::deque<double> total_stop_history_ms;
+    std::deque<double> ack_resume_history_ms;
+    auto appendHistorySample = [&](std::deque<double>& history,
+                                   double value,
+                                   std::size_t limit) {
+        history.push_back(value);
+        if (history.size() > limit) {
+            history.pop_front();
+        }
+    };
+    auto copyHistory = [&](const std::deque<double>& history) {
+        return std::vector<double>(history.begin(), history.end());
+    };
     std::optional<std::chrono::steady_clock::time_point>
         pending_unsafe_capture_timestamp;
     std::optional<std::chrono::steady_clock::time_point>
@@ -2476,16 +3435,25 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
 
     auto selectRoutine = [&](std::size_t routine_index) -> bool {
         const LiveRoutineDefinition routine = getLiveRoutineDefinition(routine_index);
+        stopLiveStepTimer();
         selected_routine_index = routine_index;
         next_routine_step_index = 0;
         std::cout << "[LIVE_TEST] routine " << routine.number << " selected: "
                   << routine.name << std::endl;
 
         if (guardian_armed && motion_gate_open && frame_is_safe) {
-            if (!stagePose(kDemoHomeStep)) {
-                return false;
+            if (routine.auto_progress) {
+                if (!stagePose(kDemoHomeStep)) {
+                    return false;
+                }
+                home_pose_staged = true;
+                if (!startLiveStepTimer()) {
+                    return false;
+                }
+            } else {
+                std::cout << "[LIVE_TEST] manual mode active: auto routine paused."
+                          << std::endl;
             }
-            home_pose_staged = true;
         }
 
         return true;
@@ -2496,6 +3464,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         pending_freeze_reason = FreezeReason::UNKNOWN_FAULT;
         freeze_command_pending = false;
         freeze_command_due.reset();
+        freeze_waiting_for_retract_logged = false;
         guardian = std::make_unique<GuardianStateMachine>(
             kLiveFreezeBadFrameThreshold,
             kLiveRecoverGoodFrameThreshold);
@@ -2507,6 +3476,10 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
                 latency_metrics.freeze_pipeline_ms = elapsedMilliseconds(
                     *pending_unsafe_decision_timestamp,
                     freeze_callback_start);
+                appendHistorySample(freeze_pipeline_history_ms,
+                                    static_cast<double>(
+                                        *latency_metrics.freeze_pipeline_ms),
+                                    kEventHistoryLimit);
             }
             stopLiveStepTimer();
             next_routine_step_index = 0;
@@ -2521,6 +3494,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
             freeze_command_pending = true;
             freeze_command_due =
                 std::chrono::steady_clock::now() + kSurgeryRetractDwell;
+            freeze_waiting_for_retract_logged = false;
             motion_gate_open = false;
             waiting_for_ack = false;
             waiting_for_ack_announced = false;
@@ -2536,15 +3510,21 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
                 latency_metrics.ack_to_resume_ms = elapsedMilliseconds(
                     *ack_request_timestamp,
                     resume_callback_end);
+                appendHistorySample(ack_resume_history_ms,
+                                    static_cast<double>(
+                                        *latency_metrics.ack_to_resume_ms),
+                                    kEventHistoryLimit);
             }
             ack_request_timestamp.reset();
             if (interlock->state() == InterlockState::FAULT) {
                 motion_faulted = true;
                 return;
             }
-            if (!startLiveStepTimer()) {
-                motion_faulted = true;
-                return;
+            if (getLiveRoutineDefinition(selected_routine_index).auto_progress) {
+                if (!startLiveStepTimer()) {
+                    motion_faulted = true;
+                    return;
+                }
             }
             motion_gate_open = true;
             std::cout << "[LIVE_TEST] resume" << std::endl;
@@ -2568,18 +3548,34 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         if (now < *freeze_command_due) {
             return true;
         }
+        if (pose_slew_active) {
+            if (!freeze_waiting_for_retract_logged) {
+                std::cout << "[LIVE_TEST] freeze pending: waiting for retract "
+                             "completion"
+                          << std::endl;
+                freeze_waiting_for_retract_logged = true;
+            }
+            return true;
+        }
 
         freeze_command_pending = false;
         freeze_command_due.reset();
+        freeze_waiting_for_retract_logged = false;
         const auto freeze_cmd_start = std::chrono::steady_clock::now();
         interlock->onControlEvent(ControlEvent::FREEZE_NOW, pending_freeze_reason);
         const auto freeze_cmd_end = std::chrono::steady_clock::now();
         latency_metrics.freeze_cmd_ms = elapsedMilliseconds(freeze_cmd_start,
                                                             freeze_cmd_end);
+        appendHistorySample(freeze_cmd_history_ms,
+                            static_cast<double>(*latency_metrics.freeze_cmd_ms),
+                            kEventHistoryLimit);
         if (pending_unsafe_capture_timestamp.has_value()) {
             latency_metrics.total_stop_ms = elapsedMilliseconds(
                 *pending_unsafe_capture_timestamp,
                 freeze_cmd_end);
+            appendHistorySample(total_stop_history_ms,
+                                static_cast<double>(*latency_metrics.total_stop_ms),
+                                kEventHistoryLimit);
         }
         pending_unsafe_capture_timestamp.reset();
         pending_unsafe_decision_timestamp.reset();
@@ -2666,8 +3662,11 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
             return false;
         }
 
-        if (!startLiveStepTimer()) {
-            return false;
+        stopLiveStepTimer();
+        if (getLiveRoutineDefinition(selected_routine_index).auto_progress) {
+            if (!startLiveStepTimer()) {
+                return false;
+            }
         }
         guardian_armed = true;
         motion_gate_open = true;
@@ -2678,6 +3677,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         pending_unsafe_decision_timestamp.reset();
         freeze_command_pending = false;
         freeze_command_due.reset();
+        freeze_waiting_for_retract_logged = false;
         std::cout << "[LIVE_TEST] ARM accepted: guardian enforcement is now ACTIVE."
                   << std::endl;
         return true;
@@ -2704,7 +3704,9 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         pending_unsafe_decision_timestamp.reset();
         freeze_command_pending = false;
         freeze_command_due.reset();
+        freeze_waiting_for_retract_logged = false;
         pose_slew_active = false;
+        stopLiveStepTimer();
         next_routine_step_index = 0;
         current_pose_name = "HOLD";
         resetEnforcementState();
@@ -2775,6 +3777,59 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         return true;
     };
 
+    auto requestManualNudge = [&](int delta_base,
+                                  int delta_lower,
+                                  int delta_upper,
+                                  int delta_grip,
+                                  const char* label) -> bool {
+        const LiveRoutineDefinition routine =
+            getLiveRoutineDefinition(selected_routine_index);
+        if (routine.auto_progress) {
+            return true;
+        }
+
+        if (!guardian_armed || !motion_gate_open || waiting_for_ack ||
+            freeze_command_pending ||
+            guardian->getState() != GuardianState::SAFE_MONITORING) {
+            std::cout << "[LIVE_TEST] manual nudge ignored: control not available"
+                      << std::endl;
+            return true;
+        }
+
+        if (!current_pose_offsets_known) {
+            current_pose_offsets = kSmokeHomePose;
+            current_pose_offsets_known = true;
+            pose_slew_target = current_pose_offsets;
+        }
+
+        SmokeJointOffsets target_offsets =
+            pose_slew_active ? pose_slew_target : current_pose_offsets;
+        target_offsets.base += delta_base;
+        target_offsets.lower += delta_lower;
+        target_offsets.upper += delta_upper;
+        target_offsets.grip += delta_grip;
+
+        bool clamped = false;
+        target_offsets = clampDemoOffsets(target_offsets, clamped);
+        pose_slew_target = target_offsets;
+        pose_slew_active =
+            (current_pose_offsets.base != pose_slew_target.base) ||
+            (current_pose_offsets.lower != pose_slew_target.lower) ||
+            (current_pose_offsets.upper != pose_slew_target.upper) ||
+            (current_pose_offsets.grip != pose_slew_target.grip);
+        next_pose_slew_due = std::chrono::steady_clock::now();
+        current_pose_name = "Manual";
+
+        if (pose_slew_active) {
+            std::cout << "[LIVE_TEST] manual " << label;
+            if (clamped) {
+                std::cout << " [clamped]";
+            }
+            std::cout << " [slew]" << std::endl;
+        }
+        return true;
+    };
+
     FrameEvent latest_frame_event;
     bool latest_frame_available = false;
     std::uint64_t frame_index = 0;
@@ -2798,6 +3853,10 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
 
                 const LiveRoutineDefinition routine =
                     getLiveRoutineDefinition(selected_routine_index);
+                if (!routine.auto_progress || routine.steps == nullptr ||
+                    routine.step_count == 0) {
+                    return ControllerEventDisposition::Consumed;
+                }
                 const DemoPoseStep& step = routine.steps[next_routine_step_index];
                 if (!stagePose(step)) {
                     return ControllerEventDisposition::Abort;
@@ -2829,6 +3888,9 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
                     latest_frame_event.image_data,
                     latest_frame_event.capture_timestamp);
                 latency_metrics.vision_us = result.processing_time.count();
+                appendHistorySample(vision_us_history,
+                                    static_cast<double>(latency_metrics.vision_us),
+                                    kVisionHistoryLimit);
                 focus_score = computeFocusScore(latest_frame_event.image_data);
                 focus_quality = focusQualityLabel(focus_score);
 
@@ -2856,6 +3918,11 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
                             latency_metrics.unsafe_detect_ms = elapsedMilliseconds(
                                 latest_frame_event.capture_timestamp,
                                 result.timestamp);
+                            appendHistorySample(unsafe_detect_history_ms,
+                                                static_cast<double>(
+                                                    *latency_metrics
+                                                         .unsafe_detect_ms),
+                                                kEventHistoryLimit);
                             logLiveLatencySample("unsafe_detect",
                                                  latency_metrics);
                         }
@@ -2892,7 +3959,81 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         return ControllerEventDisposition::Consumed;
     };
 
-    cv::namedWindow(kLiveWindowName, cv::WINDOW_AUTOSIZE);
+    cv::namedWindow(kLiveCameraWindowName, cv::WINDOW_AUTOSIZE);
+    cv::namedWindow(kLiveStatusWindowName, cv::WINDOW_AUTOSIZE);
+
+    // Add simplified colour tuning sliders to the status window.
+    // Three controls only: hue, saturation, brightness.
+    VisionConfig dynamicConfig = vision_config;
+    constexpr const char* kSliderHue = "Hue";
+    constexpr const char* kSliderSaturation = "Saturation";
+    constexpr const char* kSliderBrightness = "Brightness";
+    constexpr const char* kSliderPixelThreshold = "Pixel threshold";
+    constexpr int kHueHalfWidth = 12;
+    constexpr int kDefaultTuneHue = 85;
+    constexpr int kDefaultTuneSaturation = 255;
+    constexpr int kDefaultTuneBrightness = 164;
+    constexpr int kDefaultTunePixelThreshold = 100;
+
+    int tuning_hue_center = kDefaultTuneHue;
+    int tuning_saturation = kDefaultTuneSaturation;
+    int tuning_brightness = kDefaultTuneBrightness;
+    int tuning_pixel_threshold = kDefaultTunePixelThreshold;
+
+    auto applySimpleColourTuning = [&]() {
+        tuning_hue_center = std::clamp(tuning_hue_center, 0, 179);
+        tuning_saturation = std::clamp(tuning_saturation, 0, 255);
+        tuning_brightness = std::clamp(tuning_brightness, 0, 255);
+
+        cv::setTrackbarPos(kSliderHue, kLiveStatusWindowName, tuning_hue_center);
+        cv::setTrackbarPos(kSliderSaturation, kLiveStatusWindowName, tuning_saturation);
+        cv::setTrackbarPos(kSliderBrightness, kLiveStatusWindowName, tuning_brightness);
+        tuning_pixel_threshold = std::clamp(tuning_pixel_threshold, 0, 500);
+        cv::setTrackbarPos(kSliderPixelThreshold,
+                           kLiveStatusWindowName,
+                           tuning_pixel_threshold);
+
+        dynamicConfig.depthHueLower1 =
+            normaliseHue(tuning_hue_center - kHueHalfWidth);
+        dynamicConfig.depthHueUpper1 =
+            normaliseHue(tuning_hue_center + kHueHalfWidth);
+        dynamicConfig.depthHueLower2 = 255;
+        dynamicConfig.depthHueUpper2 = 0;
+        dynamicConfig.depthSatMin = tuning_saturation;
+        dynamicConfig.depthSatMax = 255;
+        dynamicConfig.depthValMin = tuning_brightness;
+        dynamicConfig.depthValMax = 255;
+        dynamicConfig.depthPixelThreshold = tuning_pixel_threshold;
+    };
+    auto sliderSnapshot = [&]() {
+        return std::array<int, 4>{
+            tuning_hue_center,
+            tuning_saturation,
+            tuning_brightness,
+            tuning_pixel_threshold,
+        };
+    };
+
+    cv::createTrackbar(kSliderHue,
+                       kLiveStatusWindowName,
+                       &tuning_hue_center,
+                       179);
+    cv::createTrackbar(kSliderSaturation,
+                       kLiveStatusWindowName,
+                       &tuning_saturation,
+                       255);
+    cv::createTrackbar(kSliderBrightness,
+                       kLiveStatusWindowName,
+                       &tuning_brightness,
+                       255);
+    cv::createTrackbar(kSliderPixelThreshold,
+                       kLiveStatusWindowName,
+                       &tuning_pixel_threshold,
+                       500);
+
+    applySimpleColourTuning();
+    vision_processor.updateConfig(dynamicConfig);
+    std::array<int, 4> last_slider_snapshot = sliderSnapshot();
 
     struct LiveStatusSnapshot {
         bool guardian_armed = false;
@@ -2961,6 +4102,11 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         }
     });
 
+    constexpr int kLiveStatusWidth = 430;
+    constexpr int kLiveMetricsWidth = 430;
+    cv::Mat status_frame;
+    cv::Mat metrics_frame;
+
     while (true) {
         if (interlock->state() == InterlockState::FAULT) {
             motion_faulted = true;
@@ -2969,6 +4115,13 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
             break;
         }
         (void)control_events.waitForEvents(std::chrono::milliseconds(5));
+
+        applySimpleColourTuning();
+        const std::array<int, 4> current_slider_snapshot = sliderSnapshot();
+        if (current_slider_snapshot != last_slider_snapshot) {
+            vision_processor.updateConfig(dynamicConfig);
+            last_slider_snapshot = current_slider_snapshot;
+        }
 
         std::string guardian_state_text = "DISARMED_SETUP";
         std::string interlock_state_text = "DISARMED";
@@ -3030,32 +4183,32 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
                                               GuardianState::SAFE_MONITORING) &&
                                              interlock->motionAllowed())
                                           : (current_vision_state == SafetyState::SAFE);
-        std::string ui_state_label = "SETUP";
-        std::string ui_state_description = "Waiting for safe scene";
-        std::string next_action = "MAKE SCENE SAFE";
+        std::string ui_state_label = "Setup";
+        std::string ui_state_description = "Waiting for a safe scene";
+        std::string next_action = "Make scene safe";
         if (!guardian_armed && frame_is_safe) {
-            ui_state_label = "READY";
-            ui_state_description = "Scene safe and ready to arm";
-            next_action = "PRESS CONTROL TO ARM";
+            ui_state_label = "Ready";
+            ui_state_description = "Scene is safe and ready to arm";
+            next_action = "Press control to start";
         } else if (guardian_armed && motion_gate_open && decision_is_safe) {
-            ui_state_label = "RUNNING";
-            ui_state_description = "Guard active and motion allowed";
-            next_action = "PRESS CONTROL TO DISARM";
+            ui_state_label = "Running";
+            ui_state_description = "Guard active, motion allowed";
+            next_action = "Press control to stop";
         } else if (guardian_armed &&
                    guardian->getState() == GuardianState::FROZEN_UNSAFE) {
-            ui_state_label = "FROZEN";
-            ui_state_description = "Unsafe detected, motion stopped";
-            next_action = frame_is_safe ? "PRESS CONTROL TO RESUME"
-                                        : "CLEAR WORKSPACE";
+            ui_state_label = "Frozen";
+            ui_state_description = "Unsafe condition detected, motion stopped";
+            next_action = frame_is_safe ? "Press control to resume"
+                                        : "Clear workspace";
         } else if (guardian_armed &&
                    guardian->getState() == GuardianState::RESET_PENDING) {
-            ui_state_label = "WAITING";
+            ui_state_label = "Waiting";
             ui_state_description = "Safe again, waiting for recovery";
-            next_action = "WAIT FOR RECOVERY";
+            next_action = "Waiting for recovery";
         } else if (guardian_armed && frame_is_safe) {
-            ui_state_label = "READY";
+            ui_state_label = "Ready";
             ui_state_description = "Guard armed, motion blocked";
-            next_action = "PRESS CONTROL";
+            next_action = "Press control";
         }
 
         const cv::Scalar focus_color =
@@ -3068,12 +4221,11 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
             " " + getLiveRoutineDefinition(selected_routine_index).name;
         const std::string footer_info =
             std::to_string(frameWidth(display_frame)) + "x" +
-            std::to_string(frameHeight(display_frame)) + " | marker " +
-            std::to_string(options.expected_marker_id) + " | " +
+            std::to_string(frameHeight(display_frame)) + " | " +
             camera_capture.backendName();
 
         SupervisoryUiModel live_ui{};
-        live_ui.mode_title = "LIVE TEST";
+        live_ui.mode_title = "Live test";
         live_ui.state_label = ui_state_label;
         live_ui.state_description = ui_state_description;
         live_ui.state_color =
@@ -3081,24 +4233,44 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
                 ? cv::Scalar(60, 60, 200)
                 : (frame_is_safe ? cv::Scalar(60, 170, 80)
                                  : cv::Scalar(170, 140, 60));
-        live_ui.motion_label = motion_gate_open ? "ALLOWED" : "BLOCKED";
+        live_ui.motion_label = motion_gate_open ? "Allowed" : "Blocked";
         live_ui.motion_color =
             motion_gate_open ? cv::Scalar(60, 170, 80)
                              : (frame_is_safe ? cv::Scalar(50, 180, 230)
                                               : cv::Scalar(60, 60, 200));
-        live_ui.operator_prompt = "space/button = control";
+        live_ui.operator_prompt = "space/button";
         live_ui.next_action = next_action;
-        live_ui.freeze_reason = freeze_reason_text;
+        const FreezeReason interlock_freeze_reason =
+            guardian_armed ? interlock->freezeReason() : FreezeReason::NONE;
+        live_ui.freeze_reason =
+            guardian_armed ? freezeReasonToUiString(interlock_freeze_reason) : "N/A";
         live_ui.footer_info = footer_info;
         live_ui.latency = latency_metrics;
+        live_ui.forbidden_colour_label = describeForbiddenColour(dynamicConfig);
+        live_ui.forbidden_colour_thresholds =
+            describeForbiddenColourThresholds(dynamicConfig);
+        live_ui.forbidden_colour_swatch = forbiddenColourSwatchBgr(dynamicConfig);
+        live_ui.vision_latency_history_us = copyHistory(vision_us_history);
+        live_ui.unsafe_detect_history_ms = copyHistory(unsafe_detect_history_ms);
+        live_ui.freeze_pipeline_history_ms =
+            copyHistory(freeze_pipeline_history_ms);
+        live_ui.freeze_cmd_history_ms = copyHistory(freeze_cmd_history_ms);
+        live_ui.total_stop_history_ms = copyHistory(total_stop_history_ms);
+        live_ui.ack_resume_history_ms = copyHistory(ack_resume_history_ms);
         live_ui.status_rows = {
-            {"Vision", safetyStateToString(current_vision_state),
+            {"Vision", safetyStateToUiString(current_vision_state),
              severityColor(safetyStateToString(current_vision_state))},
-            {"Guardian", guardian_state_text, severityColor(guardian_state_text)},
-            {"Interlock", interlock_state_text, severityColor(interlock_state_text)},
+            {"Guardian",
+             guardian_armed ? guardianStateToUiString(guardian->getState())
+                            : "Disarmed (setup)",
+             severityColor(guardian_state_text)},
+            {"Interlock",
+             guardian_armed ? interlockStateToUiString(interlock->state())
+                            : "Disarmed",
+             severityColor(interlock_state_text)},
             {"Routine", routine_label, cv::Scalar(25, 25, 25)},
             {"Pose", current_pose_name, cv::Scalar(25, 25, 25)},
-            {"Can arm", frame_is_safe ? "YES" : "NO",
+            {"Ready to arm", frame_is_safe ? "Yes" : "No",
              frame_is_safe ? cv::Scalar(60, 170, 80) : cv::Scalar(60, 60, 200)},
         };
         live_ui.show_focus = true;
@@ -3108,11 +4280,11 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         live_ui.focus_fraction = std::clamp(focus_score / 240.0, 0.0, 1.0);
         live_ui.camera_hud_text =
             guardian_armed && guardian->getState() == GuardianState::FROZEN_UNSAFE
-                ? "UNSAFE - MOTION HALTED"
+                ? "Unsafe: stopped"
                 : (guardian_armed && motion_gate_open && decision_is_safe)
-                      ? "LIVE - SUPERVISING"
-                : (!guardian_armed && frame_is_safe) ? "ARMED - AWAITING START"
-                                                     : "INITIALIZING";
+                      ? "Running"
+                : (!guardian_armed && frame_is_safe) ? "Ready to arm"
+                                                     : "Setup";
         live_ui.camera_hud_color =
             guardian_armed && guardian->getState() == GuardianState::FROZEN_UNSAFE
                 ? cv::Scalar(60, 60, 200)
@@ -3122,51 +4294,144 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         live_ui.camera_bottom_right = "30fps";
         live_ui.show_frozen_overlay =
             guardian_armed && guardian->getState() == GuardianState::FROZEN_UNSAFE;
-        live_ui.frozen_overlay_title = "UNSAFE";
-        live_ui.frozen_overlay_subtitle = "MOTION FROZEN - CLEAR WORKSPACE";
+        live_ui.frozen_overlay_title = "Unsafe";
+        live_ui.frozen_overlay_subtitle = "Motion frozen: clear workspace";
         live_ui.show_waiting_overlay =
             guardian_armed && guardian->getState() == GuardianState::RESET_PENDING;
-        live_ui.waiting_overlay_text = "WORKSPACE SAFE - PRESS BUTTON TO RESUME";
+        live_ui.waiting_overlay_text = "Workspace safe: press control to resume";
         live_ui.emphasise_danger =
             guardian_armed && guardian->getState() == GuardianState::FROZEN_UNSAFE;
 
-        drawSupervisoryGui(display_frame, live_ui);
+        cv::Mat camera_frame = display_frame.clone();
+        drawCameraOverlay(camera_frame, live_ui);
 
-        cv::imshow(kLiveWindowName, display_frame);
+        const int status_height = std::max(frameHeight(camera_frame), 720);
+        if (status_frame.empty() || status_frame.rows != status_height ||
+            status_frame.cols != kLiveStatusWidth) {
+            status_frame = cv::Mat(status_height,
+                                   kLiveStatusWidth,
+                                   CV_8UC3,
+                                   cv::Scalar(245, 245, 245));
+        } else {
+            status_frame.setTo(cv::Scalar(245, 245, 245));
+        }
+        drawStatusDashboard(status_frame, live_ui);
+
+        const int metrics_height = std::max(frameHeight(camera_frame), 560);
+        if (metrics_frame.empty() || metrics_frame.rows != metrics_height ||
+            metrics_frame.cols != kLiveMetricsWidth) {
+            metrics_frame = cv::Mat(metrics_height,
+                                    kLiveMetricsWidth,
+                                    CV_8UC3,
+                                    cv::Scalar(245, 245, 245));
+        } else {
+            metrics_frame.setTo(cv::Scalar(245, 245, 245));
+        }
+        drawMetricsDashboard(metrics_frame, live_ui);
+
+        cv::imshow(kLiveCameraWindowName, camera_frame);
+        cv::imshow(kLiveStatusWindowName, status_frame);
+        cv::imshow(kLiveMetricsWindowName, metrics_frame);
         const int key = cv::waitKey(1);
-        if (key == 'q' || key == 'Q') {
-            std::cout << "[LIVE_TEST] Exit requested from display window (q)." << std::endl;
+        if (key == 27) {
+            std::cout << "[LIVE_TEST] Exit requested from display window (esc)."
+                      << std::endl;
             break;
         }
 
-        if (key == ' ') {
+        int normalized_key = key;
+        if (normalized_key >= 0 && normalized_key <= 255) {
+            normalized_key = std::tolower(normalized_key);
+        }
+
+        if (normalized_key == ' ') {
             if (!requestContinue()) {
                 break;
             }
         }
 
-        if (key == 'r' || key == 'R') {
-            if (!requestContinue()) {
-                break;
+        // Handle focus control with + and - keys
+        if (normalized_key == '+' || normalized_key == '=') {
+            float current_focus = camera_capture.getFocusPosition();
+            if (current_focus < 0.0f) {
+                current_focus = 0.0f;  // Start from closest if in autofocus mode
             }
-        }
-
-        if (key == 'a' || key == 'A') {
-            if (!requestContinue()) {
-                break;
+            float new_focus = std::min(1.0f, current_focus + 0.1f);
+            camera_capture.setFocusPosition(new_focus);
+            std::cout << "[LIVE_TEST] Focus position increased to " << std::fixed 
+                      << std::setprecision(2) << new_focus << " (0.0=close, 1.0=far)" << std::endl;
+        } else if (normalized_key == '-' || normalized_key == '_') {
+            float current_focus = camera_capture.getFocusPosition();
+            if (current_focus < 0.0f) {
+                current_focus = 1.0f;  // Start from farthest if in autofocus mode
             }
-        }
-
-        if (key == 'd' || key == 'D') {
-            if (!requestDisarm()) {
-                break;
+            float new_focus = current_focus - 0.1f;
+            if (new_focus < 0.0f) {
+                new_focus = -1.0f;  // Jump to autofocus when going below 0.0
             }
+            camera_capture.setFocusPosition(new_focus);
+            std::cout << "[LIVE_TEST] Focus position decreased to " << std::fixed 
+                      << std::setprecision(2) << new_focus << " (" 
+                      << (new_focus < 0.0f ? "autofocus" : "0.0=close, 1.0=far") << ")" << std::endl;
         }
 
         std::size_t requested_routine_index = 0;
-        if (liveRoutineIndexFromKey(key, requested_routine_index)) {
+        if (liveRoutineIndexFromKey(normalized_key, requested_routine_index)) {
             if (!selectRoutine(requested_routine_index)) {
                 break;
+            }
+        }
+
+        if (!getLiveRoutineDefinition(selected_routine_index).auto_progress) {
+            switch (normalized_key) {
+                case 'd':
+                    if (!requestManualNudge(-kLiveManualNudgeDegrees, 0, 0, 0,
+                                            "BASE LEFT")) {
+                        break;
+                    }
+                    break;
+                case 'a':
+                    if (!requestManualNudge(kLiveManualNudgeDegrees, 0, 0, 0,
+                                            "BASE RIGHT")) {
+                        break;
+                    }
+                    break;
+                case 'w':
+                    if (!requestManualNudge(0, 0, kLiveManualNudgeDegrees, 0,
+                                            "FORWARD")) {
+                        break;
+                    }
+                    break;
+                case 's':
+                    if (!requestManualNudge(0, 0, -kLiveManualNudgeDegrees, 0,
+                                            "BACKWARD")) {
+                        break;
+                    }
+                    break;
+                case 'i':
+                    if (!requestManualNudge(0, kLiveManualNudgeDegrees, 0, 0, "UP")) {
+                        break;
+                    }
+                    break;
+                case 'k':
+                    if (!requestManualNudge(0, -kLiveManualNudgeDegrees, 0, 0,
+                                            "DOWN")) {
+                        break;
+                    }
+                    break;
+                case 'l':
+                    if (!requestManualNudge(0, 0, 0, kLiveManualNudgeDegrees, "OPEN")) {
+                        break;
+                    }
+                    break;
+                case 'j':
+                    if (!requestManualNudge(0, 0, 0, -kLiveManualNudgeDegrees,
+                                            "CLOSE")) {
+                        break;
+                    }
+                    break;
+                default:
+                    break;
             }
         }
     }
@@ -3176,7 +4441,8 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         capture_thread.join();
     }
 
-    cv::destroyWindow(kLiveWindowName);
+    cv::destroyWindow(kLiveCameraWindowName);
+    cv::destroyWindow(kLiveStatusWindowName);
     stopLiveStepTimer();
     motion_controller_.shutdown();
 
