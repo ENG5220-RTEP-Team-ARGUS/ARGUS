@@ -1,10 +1,10 @@
 # Doxygen configuration for ARGUS
 
 DOXYFILE_ENCODING      = UTF-8
-PROJECT_NAME           = "ARGUS"
+PROJECT_NAME           = "A.R.G.U.S"
 PROJECT_NUMBER         = "2.1.0"
 PROJECT_BRIEF          = "Adaptive Real-Time Guardian for Unsafe Situations"
-OUTPUT_DIRECTORY       = docs/api
+OUTPUT_DIRECTORY       = docs/doxygen
 CREATE_SUBDIRS         = NO
 ALLOW_UNICODE_NAMES    = YES
 OUTPUT_LANGUAGE        = English
@@ -30,11 +30,7 @@ HIDE_UNDOC_CLASSES     = NO
 HIDE_FRIEND_COMPOUNDS  = NO
 HIDE_IN_BODY_DOCS      = NO
 
-INPUT                  = README.md \
-                         include \
-                         src \
-                         docs/adr \
-                         docs/compliance_matrix.md
+INPUT                  = include/ src/
 INPUT_ENCODING         = UTF-8
 FILE_PATTERNS          = *.h \
                          *.hpp \

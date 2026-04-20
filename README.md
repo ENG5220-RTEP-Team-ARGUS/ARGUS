@@ -209,11 +209,27 @@ Key docs:
 Project wiki:
 - https://github.com/ENG5220-RTEP-Team-ARGUS/ARGUS/wiki
 
+## Documentation
+
+### Doxygen API Reference
+
+Full API documentation is generated from source comments:
+
+🔗 [Browse Doxygen Docs](https://eng5220-rtep-team-argus.github.io/ARGUS/doxygen/html/)
+
+To regenerate locally:
+
+```bash
+doxygen Doxyfile
+open docs/doxygen/html/index.html
+```
+
 ## Repository Layout
 ```text
 config/                Runtime configuration and calibration files
 docs/architecture/     Architecture and wiring diagrams
 docs/adr/              Architecture decision records
+docs/doxygen/          Generated Doxygen HTML output
 docs/compliance_matrix.md
 include/               Headers
 src/                   C++ implementation
