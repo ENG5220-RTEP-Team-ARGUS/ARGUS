@@ -1714,7 +1714,7 @@ void drawMetricsDashboard(cv::Mat& frame, const SupervisoryUiModel& model) {
 
     drawLatencyBar("Time to detect unsafe", model.latency.unsafe_detect_ms, 30);
     drawLatencyBar("Time to issue freeze", model.latency.freeze_pipeline_ms, 900);
-    drawLatencyBar("Time to stop motion", model.latency.total_stop_ms, 6000);
+    drawLatencyBar("Time to stop motion", model.latency.total_stop_ms, 8000);
 
     const cv::Scalar border_color =
         model.emphasise_danger ? cv::Scalar(60, 60, 200) : model.state_color;
