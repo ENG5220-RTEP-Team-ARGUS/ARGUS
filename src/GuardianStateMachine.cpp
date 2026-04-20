@@ -1,3 +1,8 @@
+/**
+ * @file GuardianStateMachine.cpp
+ * @brief Implementation of the guardian safety state machine.
+ */
+
 #include "GuardianStateMachine.hpp"
 #include <iostream>
 

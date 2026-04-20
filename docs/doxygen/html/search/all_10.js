@@ -1,0 +1,21 @@
+var searchData=
+[
+  ['safe_0',['safe',['../Types_8hpp.html#a02ef2dd22cac4b27e498774706e0d894ab18288babd4636cff34b15e0d1340fc2',1,'SAFE:&#160;Types.hpp'],['../RobotInterlock_8hpp.html#a2b5751bb5a84d542ba6dbeeabf25fc70ab18288babd4636cff34b15e0d1340fc2',1,'SAFE:&#160;RobotInterlock.hpp']]],
+  ['safe_5fmonitoring_1',['SAFE_MONITORING',['../GuardianStateMachine_8hpp.html#aed5e94d4a4f8879b2d8f1a3fde2b7b60a5fcc2705be02f694668f0526df9dd97a',1,'GuardianStateMachine.hpp']]],
+  ['safetyresult_2',['SafetyResult',['../structSafetyResult.html',1,'']]],
+  ['safetystate_3',['SafetyState',['../Types_8hpp.html#a02ef2dd22cac4b27e498774706e0d894',1,'Types.hpp']]],
+  ['safezonexmax_4',['safeZoneXMax',['../structVisionConfig.html#a0a569f71ae1bcd4513d5b7b1278789ba',1,'VisionConfig']]],
+  ['safezonexmin_5',['safeZoneXMin',['../structVisionConfig.html#ac69528909180d44f1c4ce77c90794580',1,'VisionConfig']]],
+  ['safezoneymax_6',['safeZoneYMax',['../structVisionConfig.html#a28beb6fab2022712a675b656e4e0eff1',1,'VisionConfig']]],
+  ['safezoneymin_7',['safeZoneYMin',['../structVisionConfig.html#a9d88959aae80ffe631705f339cfa1697',1,'VisionConfig']]],
+  ['setfocusposition_8',['setfocusposition',['../classCameraCaptureBackend.html#a9066e5fe83791c8978eb0a96899fcb4b',1,'CameraCaptureBackend::setFocusPosition()'],['../classCameraCapture.html#a3f532eae3cbd834fa4a1b2c84373fb05',1,'CameraCapture::setFocusPosition()']]],
+  ['setonclearfreezecallback_9',['setOnClearFreezeCallback',['../classGuardianStateMachine.html#a550c3e287f643ee8926faf492f1b870c',1,'GuardianStateMachine']]],
+  ['setonfreezecallback_10',['setOnFreezeCallback',['../classGuardianStateMachine.html#a76fbe293a3f5711b97397b064d361b91',1,'GuardianStateMachine']]],
+  ['setonstatechangecallback_11',['setOnStateChangeCallback',['../classGuardianStateMachine.html#a4f1e7e28691db72e02be26fef5011dae',1,'GuardianStateMachine']]],
+  ['settargets_12',['setTargets',['../classMotionController.html#a8c09cf6b6538114c8d80c50f816040fb',1,'MotionController']]],
+  ['shutdown_13',['shutdown',['../classMotionController.html#a9f68cd471d6d1c3e14fb6e3f994716fc',1,'MotionController']]],
+  ['smokejoint_14',['SmokeJoint',['../classAppController.html#a3428853d0e556e2436154f3cc030784f',1,'AppController']]],
+  ['state_15',['state',['../structSafetyResult.html#a574c08b045ffc00cce039133b2c48465',1,'SafetyResult::state'],['../classRobotInterlock.html#a9e04ba74661d425b463a38ad54382908',1,'RobotInterlock::state()']]],
+  ['statetostring_16',['stateToString',['../classGuardianStateMachine.html#a713463e785108a301752ffb4a62bec5b',1,'GuardianStateMachine']]],
+  ['statusstring_17',['statusString',['../classPhysicalButtonModule.html#a5c77e30cc632c773189003decfcf1317',1,'PhysicalButtonModule']]]
+];

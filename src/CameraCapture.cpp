@@ -1,3 +1,8 @@
+/**
+ * @file CameraCapture.cpp
+ * @brief Implementation of camera acquisition backends and facade.
+ */
+
 #include "CameraCapture.hpp"
 #include "CppTimerStdFuncCallback.h"
 

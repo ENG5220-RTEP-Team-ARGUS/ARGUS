@@ -1,3 +1,8 @@
+/**
+ * @file AppController.cpp
+ * @brief Implementation of top-level ARGUS runtime modes.
+ */
+
 #include "AppController.hpp"
 
 #include "CameraCapture.hpp"

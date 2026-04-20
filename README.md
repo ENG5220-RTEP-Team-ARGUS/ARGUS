@@ -12,14 +12,42 @@ It watches camera input, decides whether the scene is safe, and routes motion th
 ![ARGUS bench setup view 2](docs/images/argus-2.png)
 *Validated ARGUS bench setup on Raspberry Pi 5 with Pi Camera, PCA9685 and MeArm platform.*
 
-## Promotion
-ARGUS public channels for demos, build updates, and outreach:
-- Website: [thewebbutbeyond.github.io/argus](https://thewebbutbeyond.github.io/argus/)
-- Website source: [gui/argus-app](gui/argus-app)
-- Instagram: [@argus102026](https://www.instagram.com/argus102026/)
-- YouTube: [@argus-w3g](https://www.youtube.com/@argus-w3g)
-- LinkedIn: [A.R.G.U.S](https://www.linkedin.com/company/a-r-g-u-s)
-- TikTok: [@argusxisx61](https://www.tiktok.com/@argusxisx61?_r=1&_t=ZN-95E4anYeInm)
+## Bill of Materials (BOM)
+
+### Controller
+| Component | Quantity | Cost (£) |
+|----------|---------|----------|
+| Raspberry Pi 5 | 1 | Free |
+
+### Sensors & Vision
+| Component | Quantity | Cost (£) |
+|----------|---------|----------|
+| Raspberry Pi Camera Module | 1 | Free |
+
+### Additional Components
+| Component | Quantity | Cost (£) |
+|----------|---------|----------|
+| MeArm Maker Kit V3 | 1 | £47 |
+| Adafruit PCA9685 | 1 | £14.40 |
+| Raspberry Pi Power Supply | 1 | £11.50 |
+| Tactile Switch Button | 1 | Free |
+| 6V AA Batteries | 1 | Free |
+| Breadboard | 1 | Free |
+| Jumper Wires | 1 | Free |
+| 3D Printed Tools | 2 | Free |
+
+**Total Cost:** £72.90
+
+### Current validated bench hardware
+| Component | Quantity | Notes |
+|----------|---------|-------|
+| Raspberry Pi 5 | 1 | validated target |
+| Raspberry Pi camera | 1 | used with `libcamerify` |
+| Adafruit PCA9685 | 1 | I2C servo driver |
+| MeArm | 1 | 4-servo arm |
+| Servos | 4 | base / lower / upper / grip |
+| Momentary tactile button | 1 | active-low physical continue / ACK |
+| External 6V battery pack | 1 | servo power |
 
 ## What Is Validated
 Current validated runtime path:
@@ -181,11 +209,27 @@ Key docs:
 Project wiki:
 - https://github.com/ENG5220-RTEP-Team-ARGUS/ARGUS/wiki
 
+## Documentation
+
+### Doxygen API Reference
+
+Full API documentation is generated from source comments:
+
+🔗 [Browse Doxygen Docs](https://eng5220-rtep-team-argus.github.io/ARGUS/doxygen/html/)
+
+To regenerate locally:
+
+```bash
+doxygen Doxyfile
+open docs/doxygen/html/index.html
+```
+
 ## Repository Layout
 ```text
 config/                Runtime configuration and calibration files
 docs/architecture/     Architecture and wiring diagrams
 docs/adr/              Architecture decision records
+docs/doxygen/          Generated Doxygen HTML output
 docs/compliance_matrix.md
 include/               Headers
 src/                   C++ implementation
@@ -193,25 +237,35 @@ scripts/               Pi run/test helper scripts
 tests/                 CTest targets
 third_party/           Vendored third-party dependencies
 ```
+## Promotion
+ARGUS public channels for demos, build updates, and outreach:
+- Website: [thewebbutbeyond.github.io/argus](https://thewebbutbeyond.github.io/argus/)
+- Website source: [gui/argus-app](gui/argus-app)
+- Instagram: [@argus102026](https://www.instagram.com/argus102026/)
+- YouTube: [@argus-w3g](https://www.youtube.com/@argus-w3g)
+- LinkedIn: [A.R.G.U.S](https://www.linkedin.com/company/a-r-g-u-s)
+- TikTok: [@argusxisx61](https://www.tiktok.com/@argusxisx61?_r=1&_t=ZN-95E4anYeInm)
+  
+## Authors & Contributions
 
-## Team
 | Name | Component Ownership | Key Contributions |
 |------|-------------------|-------------------|
-| Nathan Sidi Bakari | MotionController, AppController | Servo output path, PCA9685 integration, run modes, hardware validation |
-| Patricia Munginga | VisionProcessor | Vision pipeline, colour safety logic, docs |
-| Jui Ning Chin | GuardianStateMachine | FSM logic and transitions |
-| Liyue Tian | CameraCapture | Camera backends and fallback behaviour |
-| Nigar Baghirova | RobotInterlock | Interlock gate and motion enable/disable logic |
+| Nathan Sidi Bakari| MotionController, AppController | Servo output path, PCA9685 driver integration, run modes, CLI interface, hardware wiring, social media content |
+| Patricia Munginga | VisionProcessor | Vision safety pipeline, colour detection, Doxygen documentation, PR reviews, social media content |
+| Jui Ning Chin | GuardianStateMachine | FSM design and implementation, state transitions, freeze/recovery logic, social media content|
+| Liyue Tian | CameraCapture | Camera acquisition pipeline, libcamera2opencv integration, V4L2 fallback, social media content |
+| Nigar Baghirova | RobotInterlock | Interlock gate logic, atomic state management, motion enable/disable, social media content|
 
-Project management board:
-- https://github.com/orgs/ENG5220-RTEP-Team-ARGUS/projects
+### Project management
+
+This project is tracked using [GitHub Projects](https://github.com/orgs/ENG5220-RTEP-Team-ARGUS/projects). The project board tracks all issues, bugs and tasks with clear ownership per team member.
 
 ## Acknowledgements
-- Dr Porr and Dr Chongfeng Wei (ENG5220 Real-Time Embedded Programming)
-- Teaching assistants for lab and code guidance
-- Bernd Porr open-source libraries:
-  - [cppTimer](https://github.com/berndporr/cppTimer)
-  - [libcamera2opencv](https://github.com/berndporr/libcamera2opencv)
+
+- **Dr Bernd Porr** and **Dr Chongfeng Wei** - course lecturers, ENG5220 Real-Time Embedded Programming
+- **Teaching assistants** — lab support and coding standard guidance
+- **Bernd Porr's open-source libraries** - [cppTimer](https://github.com/berndporr/cppTimer) and [libcamera2opencv](https://github.com/berndporr/libcamera2opencv), vendored under `third_party/` with GPL licensing
+- **University of Glasgow, School of Engineering** - lab facilities and hardware budget
 
 ## License
 Mixed license model:

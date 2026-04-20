@@ -1,3 +1,8 @@
+/**
+ * @file RobotInterlock.cpp
+ * @brief Implementation of the safety interlock gate.
+ */
+
 #include "RobotInterlock.hpp"
 
 #include <iostream>

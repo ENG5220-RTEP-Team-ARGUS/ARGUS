@@ -1,3 +1,8 @@
+/**
+ * @file PhysicalButtonModule.cpp
+ * @brief Implementation of GPIO-based physical button handling.
+ */
+
 #include "PhysicalButtonModule.hpp"
 
 #include <algorithm>

@@ -1,3 +1,8 @@
+/**
+ * @file main.cpp
+ * @brief CLI entry point for ARGUS runtime modes.
+ */
+
 #include "AppController.hpp"
 
 #include <exception>

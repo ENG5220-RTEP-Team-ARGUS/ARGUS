@@ -1,3 +1,8 @@
+/**
+ * @file MotionController.cpp
+ * @brief Implementation of PCA9685-based servo output control.
+ */
+
 #include "MotionController.hpp"
 #include "CppTimerStdFuncCallback.h"
 
