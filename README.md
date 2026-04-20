@@ -8,12 +8,14 @@
 - [Overview](#overview)
 - [Getting Started (Fresh Debian Trixie)](#getting-started-fresh-debian-trixie)
 - [Real-World Use Case](#real-world-use-case)
+- [Requirements](#requirements)
 - [System Architecture](#system-architecture)
 - [Bill of Materials (BOM)](#bill-of-materials-bom)
 - [Installation & Setup](#installation--setup)
 - [Hardware Wiring Cheat Sheet](#hardware-wiring-cheat-sheet)
 - [Building the Project](#building-the-project)
 - [Running the System](#running-the-system)
+- [GUI & Runtime Overlay](#gui--runtime-overlay)
 - [Testing](#testing)
 - [Project Structure](#project-structure)
 - [Core Components](#core-components)
@@ -21,6 +23,7 @@
 - [Documentation](#documentation)
 - [Social Media & PR](#social-media--pr)
 - [Authors & Contributions](#authors--contributions)
+- [Project Management](#project-management)
 - [Acknowledgements](#acknowledgements)
 - [License](#license)
 - [Future Work](#future-work)
@@ -87,7 +90,7 @@ Live supervised run:
 ## Overview
 <p align="justify"> A.R.G.U.S (Adaptive Real-Time Guardian for Unsafe Situations) is a real-time, vision-based safety system for robotic manipulators, designed for high-risk environments such as surgical robotics and industrial automation. It continuously monitors the workspace - particularly during critical operations like instrument exchange - where unexpected motion can cause damage or injury. By analysing visual input under strict latency constraints, A.R.G.U.S. detects deviations from expected conditions and immediately triggers fail-safe interventions (e.g. hard stops) using event-driven control. This ensures deterministic, reliable interruption of motion, preventing accidents before they occur.</p>
 
-(INsert images of the setup)
+Bench setup photo pending final hardware enclosure revision.
 
 ### Current validated implementation
 This branch is the first fully working Raspberry Pi hardware baseline for ARGUS. The currently validated runtime path is:
@@ -103,7 +106,7 @@ It has been exercised on real hardware with:
 
 Current implemented capabilities:
 - live camera capture on Raspberry Pi
-- ArUco-based safety evaluation
+- colour-depth safety evaluation (forbidden layer detection in ROI)
 - guardian freeze / recover logic
 - interlock-gated motion
 - PCA9685-backed servo output
@@ -124,8 +127,30 @@ A.R.G.U.S is designed for **safety-critical environments**, including:
 
 During operations such as **tool exchange**, unexpected motion can cause injury or system failure. A.R.G.U.S ensures the robot only operates under valid conditions, stopping instantly when anomalies occur.
 
+## Requirements
+
+### Functional requirements
+
+| ID | Requirement | Status |
+|----|-------------|--------|
+| FR-1 | System shall monitor the workspace in real time and classify each frame as safe or unsafe | Implemented |
+| FR-2 | System shall freeze motion when an unsafe condition is sustained and confirmed by the guardian FSM | Implemented |
+| FR-3 | System shall require explicit operator control input before resuming after freeze | Implemented |
+| FR-4 | System shall support live supervision, smoke tests, calibration, and manual drive utilities | Implemented |
+| FR-5 | System shall expose runtime latency metrics for real-time validation | Implemented |
+
+### Non-functional requirements
+
+| ID | Requirement | Status |
+|----|-------------|--------|
+| NFR-1 | Safety-critical timing shall use event-driven primitives (no `sleep()` timing on critical path) | Implemented |
+| NFR-2 | Vision processing shall run with bounded per-frame execution time | Implemented |
+| NFR-3 | System shall build and run on Raspberry Pi 5 with documented package dependencies | Validated |
+| NFR-4 | Safety modules shall remain separated by clear interfaces and responsibilities | Implemented |
+| NFR-5 | Public interfaces shall be documented and traceable to runtime behavior | In progress |
+
 ### Current project focus
-The current branch validates that safety workflow on a small real arm using marker-based supervision:
+The current branch validates that safety workflow on a small real arm using colour-depth supervision:
 - safe scene required before motion
 - freeze on unsafe visual state
 - operator acknowledgement required for recovery
@@ -134,7 +159,12 @@ The current branch validates that safety workflow on a small real arm using mark
 ---
 
 ## System Architecture
-> *(Insert diagram from `/docs/architecture`)*
+
+Reference diagrams (current repo):
+- [System software architecture (PDF)](docs/architecture/System%20Software%20Architecture_V1.pdf)
+- [Guardian state machine (PDF)](docs/architecture/Guardian_State_Machine_v2.pdf)
+- [Vision safety pipeline (PDF)](docs/architecture/Vision_Safety_Pipeline.pdf)
+- [Threading model (PDF)](docs/architecture/Threading_Model.pdf)
 
 - Camera input → event stream
 - Region of Interest (ROI) validation
@@ -146,7 +176,7 @@ The current branch validates that safety workflow on a small real arm using mark
 
 ### Current guarded hardware path
 - CameraCapture acquires frames on the Pi
-- VisionProcessor evaluates marker-based safety
+- VisionProcessor evaluates forbidden-layer colour exposure
 - GuardianStateMachine decides freeze / recovery transitions
 - RobotInterlock blocks or allows motion
 - MotionController drives the PCA9685 servo output path
@@ -204,18 +234,21 @@ Use the exact commands from:
 - use the wrapper scripts for Pi camera modes; they try the compliance backend
   first and use `libcamerify` only for the OpenCV/V4L2 fallback path
 - `live_test.sh` self-elevates with `sudo` because the physical button uses the GPIO character-device interface
-- the current default expected marker ID is `23`
+- `--expected-marker-id` is kept for CLI compatibility while colour-depth mode is active
 - the project vendors Bernd Porr `cppTimer` and `libcamera2opencv` under `third_party/`
 - in auto mode, camera capture now tries the bundled Bernd backend first and
   falls back to the older OpenCV/V4L2 path only if that fails
 - you can force the Bernd camera backend with:
   `ARGUS_CAMERA_BACKEND=libcamera2opencv`
 - third-party licensing and attribution are documented in
-  [THIRD_PARTY_NOTICES.md](/home/nathan_sidib/Code/ENG5220-RTEP-ARGUS/ARGUS/THIRD_PARTY_NOTICES.md)
+  [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 
 ---
 
 ## Hardware Wiring Cheat Sheet
+
+![Wiring diagram](docs/architecture/Wiring_Diagram_v1.png)
+*Reference wiring view for Pi, PCA9685, camera, button, and servo power rails.*
 
 ### Raspberry Pi to PCA9685
 - Pi `3V3` -> PCA9685 `VCC`
@@ -309,7 +342,7 @@ Notes:
 - use `--camera-backend <name>` to force a single backend
 - this mode is intended for repeatable Pi backend validation logs
 
-#### 3) Live marker test
+#### 3) Live safety test
 Recommended on Raspberry Pi:
 
 ```bash
@@ -318,14 +351,13 @@ Recommended on Raspberry Pi:
 
 Options:
 - `--camera-index <n>`: camera index, default `0`
-- `--expected-marker-id <n>`: expected ArUco ID, default `23`
+- `--expected-marker-id <n>`: legacy compatibility option, default `23`
 - `--camera-backend <name>`: `auto`, `libcamera2opencv`, or `opencv`
 - `--auto-ack`: auto-send operator acknowledge when frozen
 - `--help`: print usage
 
 Notes:
-- `./scripts/live_test.sh` uses the default camera index `0` and expected
-  marker ID `23`
+- `./scripts/live_test.sh` uses camera index `0` and legacy expected-id value `23`
 - by default the wrapper tries `libcamera2opencv` first and falls back to the
   older OpenCV/V4L2 path only if that run fails
 - if you want to force a backend explicitly, pass `--camera-backend`
@@ -483,12 +515,11 @@ Default armed routine (`SURGERY_CUT`):
 
 Live-test controls:
 - `space`: single-button control
-- `a`, `r`, `d`: legacy aliases for the same control path
 - `0`: select mode 0 (`MANUAL`, no auto routine progression)
 - `1`: select routine 1 (`SURGERY_CUT`)
 - `2`: select routine 2 (`BASE_SCAN`)
 - `3`: select routine 3 (`GRIP_PULSE`)
-- `q`: quit
+- `esc`: quit
 
 Physical button behavior:
 - in live mode, the physical button is the default single-button operator control
@@ -505,21 +536,53 @@ GPIO overrides:
 
 ---
 
+## GUI & Runtime Overlay
+
+Live mode renders three OpenCV windows:
+- camera view (workspace feed)
+- status dashboard (state, interlock, routine, operator prompt)
+- metrics dashboard (focus and latency bars)
+
+Overlay labels are driven from the same runtime state used by control logic:
+- vision result (`SAFE`, `DEPTH_EXCEEDED`, etc.)
+- guardian state (`SAFE_MONITORING`, `FROZEN_UNSAFE`, `RESET_PENDING`)
+- interlock state and freeze reason
+- active routine and current pose step
+
+Latency metrics shown in the dashboard:
+- `vision_us`: time inside `VisionProcessor::process()`
+- `unsafe_detect_ms`: frame capture → unsafe decision
+- `freeze_pipeline_ms`: unsafe decision → freeze callback
+- `total_stop_ms`: first unsafe frame capture → freeze command issued
+- `ack_to_resume_ms`: operator continue input → motion re-enable
+
+These are software-side timings; they do not include physical servo inertia.
+
+---
+
 ## Testing
 
-There is no required `make test` flow for this branch.
-Use the validated hardware/software checks listed below.
+Unit tests:
+```bash
+cmake -S . -B build
+cmake --build build -j"$(nproc)"
+ctest --test-dir build --output-on-failure
+```
+
+Hardware/software checks:
+- `./scripts/camera_backend_check.sh`
+- `./scripts/live_test.sh`
 
 ### Current validated test workflow
 1. Start in `DISARMED` mode.
-2. Position the printed marker in view.
+2. Ensure the workspace starts in a safe colour state.
 3. Wait until the current reading is safe.
-4. Press `a` to arm enforcement.
-5. Move the marker out of view or out of the valid region to verify freeze behavior.
+4. Press `space` (or physical button) to arm enforcement.
+5. Expose the forbidden layer colour in ROI to verify freeze behavior.
 6. Restore a safe view.
-7. Press `r` or the physical button to acknowledge and recover.
-8. Press `d` to return to setup mode as needed.
-9. Press `q` to exit.
+7. Press `space` or the physical button to acknowledge and recover.
+8. Press `space` again to disarm when needed.
+9. Press `esc` to exit.
 
 ### Hardware validation completed
 Validated on real hardware:
@@ -533,22 +596,19 @@ Validated on real hardware:
 ### What you should see
 In terminal:
 - `armed=YES/NO`
-- `can_arm=YES/NO`
+- `safe=YES/NO`
+- `waiting=YES/NO`
+- `routine=<n>`
 - `vision=...`
 - `guardian=...`
 - `interlock=...`
 - `motion_ctrl=...`
 - `freeze_reason=...`
 
-In the OpenCV window:
-- live camera feed
-- `VISION`
-- `GUARDIAN`
-- `INTERLOCK`
-- `CONTROL`
-- `POSE`
-- `DEMO`
-- `FREEZE`
+In the OpenCV windows:
+- camera feed
+- status dashboard
+- metrics dashboard
 
 ---
 
@@ -692,7 +752,7 @@ command latency unless external measurement hardware is added.
 ## Documentation
 
 ### Wiki
-[https://github.com/ENG5220-RTEP-Team-ARGUS/ARGUS/wiki](https://github.com/ENG5220-RTEP-Team-ARGUS/ARGUS.wiki.git)
+[ARGUS Wiki](https://github.com/ENG5220-RTEP-Team-ARGUS/ARGUS/wiki)
 
 ### Doxygen
 All public classes and interfaces are documented using Doxygen.
@@ -715,19 +775,17 @@ v4l2-ctl --list-formats-ext -d /dev/video0
 -  [YouTube](https://www.youtube.com/@argus-w3g)
 -  [LinkedIn](https://www.linkedin.com/company/a-r-g-u-s)
 -  [TikTok](https://www.tiktok.com/@argusxisx61?_r=1&_t=ZN-95E4anYeInm)
-
-### Platform Performance Summary
 ---
 
 ## Authors & Contributions
 
-| Name | Contribution |
-|------|-------------|
-| Member 1 |  |
-| Member 2 |  |
-| Member 3 |  |
-| Member 4 |  |
-| Member 5 |  |
+| Name | Component ownership | Key contributions |
+|------|---------------------|-------------------|
+| Nathan Sidi Bakari | MotionController, AppController | PCA9685 motion path, run modes, hardware integration, runtime validation |
+| Patricia Munginga | VisionProcessor | colour-depth safety pipeline, detection tuning, documentation support |
+| Jui Ning Chin | GuardianStateMachine | FSM design, transition logic, freeze/recovery behavior |
+| Liyue Tian | CameraCapture | camera backend integration, backend fallback validation |
+| Nigar Baghirova | RobotInterlock | interlock gate behavior, freeze/allow control path |
 
 ---
 ## Project Management
@@ -738,9 +796,10 @@ This project is tracked using GitHub Projects. Our project board tracks all issu
 
 ## Acknowledgements
 
-- Course lecturers
-- Lab technicians
-- Funding/support sources
+- Dr Bernd Porr and Dr Chongfeng Wei (ENG5220 lecturers)
+- Teaching assistants and lab technicians
+- University of Glasgow School of Engineering
+- Bernd Porr open-source references (`cppTimer`, `libcamera2opencv`)
 
 ---
 
@@ -752,11 +811,11 @@ This repository is mixed-license:
 - vendored Bernd Porr components under `third_party/` keep their original GPL
   licenses
 - attribution and file-level licensing details are listed in
-  [THIRD_PARTY_NOTICES.md](/home/nathan_sidib/Code/ENG5220-RTEP-ARGUS/ARGUS/THIRD_PARTY_NOTICES.md)
+  [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 - if you redistribute a build of `ARGUS` that includes the vendored GPL
   components, you must comply with those GPL terms
 
-See [LICENSE](/home/nathan_sidib/Code/ENG5220-RTEP-ARGUS/ARGUS/LICENSE) for the
+See [LICENSE](LICENSE) for the
 repository-level licensing note.
 
 ---
