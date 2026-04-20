@@ -12,14 +12,35 @@ It watches camera input, decides whether the scene is safe, and routes motion th
 ![ARGUS bench setup view 2](docs/images/argus-2.png)
 *Validated ARGUS bench setup on Raspberry Pi 5 with Pi Camera, PCA9685 and MeArm platform.*
 
-## Promotion
-ARGUS public channels for demos, build updates, and outreach:
-- Website: [thewebbutbeyond.github.io/argus](https://thewebbutbeyond.github.io/argus/)
-- Website source: [gui/argus-app](gui/argus-app)
-- Instagram: [@argus102026](https://www.instagram.com/argus102026/)
-- YouTube: [@argus-w3g](https://www.youtube.com/@argus-w3g)
-- LinkedIn: [A.R.G.U.S](https://www.linkedin.com/company/a-r-g-u-s)
-- TikTok: [@argusxisx61](https://www.tiktok.com/@argusxisx61?_r=1&_t=ZN-95E4anYeInm)
+## Bill of Materials (BOM)
+
+### Controller
+| Component | Quantity | Cost (£) |
+|----------|---------|----------|
+| Raspberry Pi 5 | 1 | Not tracked in repo |
+
+### Sensors & Vision
+| Component | Quantity | Cost (£) |
+|----------|---------|----------|
+| Raspberry Pi Camera Module | 1 | Not tracked in repo |
+
+### Additional Components
+| Component | Quantity | Cost (£) |
+|----------|---------|----------|
+| MeArm test platform | 1 | Not tracked in repo |
+
+**Total Cost:** Not tracked in the repository.
+
+### Current validated bench hardware
+| Component | Quantity | Notes |
+|----------|---------|-------|
+| Raspberry Pi 5 | 1 | validated target |
+| Raspberry Pi camera | 1 | used with `libcamerify` |
+| Adafruit PCA9685 | 1 | I2C servo driver |
+| MeArm | 1 | 4-servo arm |
+| Servos | 4 | base / lower / upper / grip |
+| Momentary tactile button | 1 | active-low physical continue / ACK |
+| External 6V battery pack | 1 | servo power |
 
 ## What Is Validated
 Current validated runtime path:
@@ -193,7 +214,15 @@ scripts/               Pi run/test helper scripts
 tests/                 CTest targets
 third_party/           Vendored third-party dependencies
 ```
-
+## Promotion
+ARGUS public channels for demos, build updates, and outreach:
+- Website: [thewebbutbeyond.github.io/argus](https://thewebbutbeyond.github.io/argus/)
+- Website source: [gui/argus-app](gui/argus-app)
+- Instagram: [@argus102026](https://www.instagram.com/argus102026/)
+- YouTube: [@argus-w3g](https://www.youtube.com/@argus-w3g)
+- LinkedIn: [A.R.G.U.S](https://www.linkedin.com/company/a-r-g-u-s)
+- TikTok: [@argusxisx61](https://www.tiktok.com/@argusxisx61?_r=1&_t=ZN-95E4anYeInm)
+  
 ## Team
 | Name | Component Ownership | Key Contributions |
 |------|-------------------|-------------------|
