@@ -3970,13 +3970,15 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
     constexpr const char* kSliderBrightness = "Brightness";
     constexpr const char* kSliderPixelThreshold = "Pixel threshold";
     constexpr int kHueHalfWidth = 12;
+    constexpr int kDefaultTuneHue = 85;
+    constexpr int kDefaultTuneSaturation = 255;
+    constexpr int kDefaultTuneBrightness = 164;
+    constexpr int kDefaultTunePixelThreshold = 100;
 
-    int tuning_hue_center =
-        hueBandMidpoint(dynamicConfig.depthHueLower1, dynamicConfig.depthHueUpper1);
-    int tuning_saturation = std::clamp(dynamicConfig.depthSatMin, 0, 255);
-    int tuning_brightness = std::clamp(dynamicConfig.depthValMin, 0, 255);
-    int tuning_pixel_threshold =
-        std::clamp(dynamicConfig.depthPixelThreshold, 0, 500);
+    int tuning_hue_center = kDefaultTuneHue;
+    int tuning_saturation = kDefaultTuneSaturation;
+    int tuning_brightness = kDefaultTuneBrightness;
+    int tuning_pixel_threshold = kDefaultTunePixelThreshold;
 
     auto applySimpleColourTuning = [&]() {
         tuning_hue_center = std::clamp(tuning_hue_center, 0, 179);
