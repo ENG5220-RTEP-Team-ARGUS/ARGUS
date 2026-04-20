@@ -3091,7 +3091,7 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
         << "[LIVE_TEST] Physical button = single-button control\n"
         << "[LIVE_TEST] Controls: space/button=control, 0/1/2/3=mode/routine, esc=quit\n"
         << "[LIVE_TEST] Manual mode keys: d/a=base left/right, w/s=forward/back, i/k=up/down, l/j=open/close\n"
-        << "[LIVE_TEST] Focus keys: +/-=manual focus (Pi Camera Module 3 only)\n"
+        << "[LIVE_TEST] Focus keys: +/-=adjust focus (Pi Camera Module 3 only, -=autofocus)\n"
         << "[LIVE_TEST] Starting in DISARMED setup mode\n"
         << "[LIVE_TEST] Guardian thresholds: freeze after "
         << kLiveFreezeBadFrameThreshold
@@ -4167,10 +4167,14 @@ int AppController::runLiveMarkerTest(const LiveTestOptions& options) {
             if (current_focus < 0.0f) {
                 current_focus = 1.0f;  // Start from farthest if in autofocus mode
             }
-            float new_focus = std::max(0.0f, current_focus - 0.1f);
+            float new_focus = current_focus - 0.1f;
+            if (new_focus < 0.0f) {
+                new_focus = -1.0f;  // Jump to autofocus when going below 0.0
+            }
             camera_capture.setFocusPosition(new_focus);
             std::cout << "[LIVE_TEST] Focus position decreased to " << std::fixed 
-                      << std::setprecision(2) << new_focus << " (0.0=close, 1.0=far)" << std::endl;
+                      << std::setprecision(2) << new_focus << " (" 
+                      << (new_focus < 0.0f ? "autofocus" : "0.0=close, 1.0=far") << ")" << std::endl;
         }
 
         std::size_t requested_routine_index = 0;

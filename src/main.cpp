@@ -42,7 +42,7 @@ void printUsage(const char* program_name) {
         << "  w/s                       Forward/backward\n"
         << "  i/k                       Up/down\n"
         << "  l/j                       Open/close gripper\n"
-        << "  +/-                       Manual camera focus (Pi Camera Module 3 only)\n"
+        << "  +/-                       Adjust camera focus (Pi Camera Module 3 only, -=autofocus)\n"
         << "  esc                       Quit\n";
 }
 
