@@ -12,6 +12,14 @@ It watches camera input, decides whether the scene is safe, and routes motion th
 ![ARGUS bench setup view 2](docs/images/argus-2.png)
 *Validated ARGUS bench setup on Raspberry Pi 5 with Pi Camera, PCA9685 and MeArm platform.*
 
+## Promotion
+ARGUS public channels for demos, build updates, and outreach:
+- Website: content refresh in progress, source at [gui/argus-app](gui/argus-app)
+- Instagram: [@argus102026](https://www.instagram.com/argus102026/)
+- YouTube: [@argus-w3g](https://www.youtube.com/@argus-w3g)
+- LinkedIn: [A.R.G.U.S](https://www.linkedin.com/company/a-r-g-u-s)
+- TikTok: [@argusxisx61](https://www.tiktok.com/@argusxisx61?_r=1&_t=ZN-95E4anYeInm)
+
 ## What Is Validated
 Current validated runtime path:
 
@@ -172,16 +180,12 @@ Key docs:
 Project wiki:
 - https://github.com/ENG5220-RTEP-Team-ARGUS/ARGUS/wiki
 
-Additive wiki update pack (designed to build on top of existing wiki pages, not replace them):
-- [docs/wiki_additions/README.md](docs/wiki_additions/README.md)
-
 ## Repository Layout
 ```text
 config/                Runtime configuration and calibration files
 docs/architecture/     Architecture and wiring diagrams
 docs/adr/              Architecture decision records
 docs/compliance_matrix.md
-docs/wiki_additions/   Additive wiki page drafts
 include/               Headers
 src/                   C++ implementation
 scripts/               Pi run/test helper scripts
