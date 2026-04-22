@@ -53,3 +53,4 @@ compliance/
 
 # Local GUI app workspace clone/build outputs
 gui/argus-app/
+.omx/
