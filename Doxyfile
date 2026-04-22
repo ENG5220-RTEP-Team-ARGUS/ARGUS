@@ -30,7 +30,7 @@ HIDE_UNDOC_CLASSES     = NO
 HIDE_FRIEND_COMPOUNDS  = NO
 HIDE_IN_BODY_DOCS      = NO
 
-INPUT                  = include/ src/
+INPUT                  = include/ src/ docs/doxygen-mainpage.md
 INPUT_ENCODING         = UTF-8
 FILE_PATTERNS          = *.h \
                          *.hpp \
@@ -67,8 +67,7 @@ INLINE_SOURCES         = NO
 REFERENCED_BY_RELATION = YES
 REFERENCES_RELATION    = YES
 
-USE_MDFILE_AS_MAINPAGE = README.md
-EXTENSION_MAPPING      = md=markdown
+USE_MDFILE_AS_MAINPAGE = docs/doxygen-mainpage.md
 
 ENABLE_PREPROCESSING   = YES
 MACRO_EXPANSION        = NO
