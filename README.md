@@ -217,6 +217,9 @@ Full API documentation is generated from source comments:
 
 🔗 [Browse Doxygen Docs](https://eng5220-rtep-team-argus.github.io/ARGUS/doxygen/html/)
 
+If the public Pages deployment has not run yet, open the tracked local copy:
+[docs/doxygen/html/index.html](docs/doxygen/html/index.html)
+
 To regenerate locally:
 
 ```bash
